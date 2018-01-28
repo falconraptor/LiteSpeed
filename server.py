@@ -1,0 +1,223 @@
+import socket
+from argparse import ArgumentParser
+from collections import namedtuple
+from http.server import BaseHTTPRequestHandler
+from socketserver import ThreadingTCPServer
+from urllib.parse import unquote
+
+from wsgiref.handlers import SimpleHandler
+
+import re
+
+import sys
+
+urls = {}
+__route_cache = {}
+statuses = {
+    100: '100 Continue',
+    101: '101 Switching Protocols',
+    200: '200 OK',
+    201: '201 Created',
+    202: '202 Accepted',
+    203: '203 Non-Authoritative Information',
+    204: '204 No Content',
+    205: '205 Reset Content',
+    206: '206 Partial Content',
+    300: '300 Multiple Choices',
+    301: '301 Moved Permanently',
+    302: '302 Found',
+    303: '303 See Other',
+    304: '304 Not Modified',
+    307: '307 Temporary Redirect',
+    308: '308 Permanent Redirect',
+    400: '400 Bad Request',
+    401: '401 Unauthorized',
+    403: '403 Forbidden',
+    404: '404 Not Found',
+    405: '405 Method Not Allowed',
+    406: '406 Not Acceptable',
+    407: '407 Proxy Authentication Required',
+    408: '408 Request Timeout',
+    409: '409 Conflict',
+    410: '410 Gone',
+    411: '411 Length Required',
+    412: '412 Precondition Failed',
+    413: '413 Payload Too Large',
+    414: '414 URI Too Long',
+    415: '415 Unsupported Media Type',
+    416: '416 Range Not Satisfiable',
+    417: '417 Expectation Failed',
+    426: '426 Upgrade Required',
+    428: '428 Precondition Required',
+    429: '429 Too Many Requests',
+    431: '431 Request Header Fields Too Large',
+    451: '451 Unavailable For Legal Reasons',
+    500: '500 Internal Server Error',
+    501: '501 Not Implemented',
+    502: '502 Bad Gateway',
+    503: '503 Service Unavailable',
+    504: '504 Gateway Timeout',
+    505: '505 HTTP Version Not Supported',
+    506: '506 Variant Also Negotiates',
+    507: '507 Insufficient Storage',
+    510: '510 Not Extended',
+    511: '511 Network Authentication Required'
+}
+
+
+class WSGIServer(ThreadingTCPServer):
+    request_queue_size = 500
+    allow_reuse_address = True
+    application = None
+    base_environ = {}
+
+    def server_bind(self):
+        """Override server_bind to store the server name."""
+        super().server_bind()
+        self.setup_env(self.server_address[1])
+
+    @classmethod
+    def setup_env(cls, port):
+        if not cls.base_environ:
+            cls.base_environ = {'SERVER_NAME': socket.gethostname(), 'GATEWAY_INTERFACE': 'CGI/1.1', 'SERVER_PORT': str(port), 'REMOTE_HOST': '', 'CONTENT_LENGTH': '', 'SCRIPT_NAME': ''}
+
+    def get_app(self):
+        return self.application
+
+    def set_app(self, application):
+        self.application = application
+
+
+class ServerHandler(SimpleHandler):
+    os_environ = {}
+
+    def close(self):
+        try:
+            self.request_handler.log_request(self.status.split(' ', 1)[0], self.bytes_sent)
+        finally:
+            super().close()
+
+
+class WSGIRequestHandler(BaseHTTPRequestHandler):
+
+    def __init__(self, request, client_address, server):
+        super().__init__(request, client_address, server)
+        self.raw_requestline = ''
+        self.requestline = ''
+        self.request_version = ''
+        self.command = ''
+
+    def get_environ(self):
+        env = {'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command}
+        path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
+        env['PATH_INFO'] = unquote(path, 'iso-8859-1')
+        host = self.address_string()
+        if host != self.client_address[0]:
+            env['REMOTE_HOST'] = host
+        env['REMOTE_ADDR'] = self.client_address[0]
+        env['CONTENT_TYPE'] = self.headers.get_content_type() if not self.headers.get('content-type') else self.headers['content-type']
+        length = self.headers.get('content-length')
+        if length:
+            env['CONTENT_LENGTH'] = length
+        env.update({k.replace('-', '_').upper(): v.strip() for k, v in self.headers.items() if k.replace('-', '_').upper() not in env})
+        return env
+
+    def handle(self):
+        self.raw_requestline = self.rfile.readline(65537)
+        if len(self.raw_requestline) > 65536:
+            self.requestline = ''
+            self.request_version = ''
+            self.command = ''
+            self.send_error(414)
+            return
+        if not self.parse_request():
+            return
+        handler = ServerHandler(self.rfile, self.wfile, sys.stderr, self.get_environ())
+        handler.request_handler = self
+        handler.run(self.server.get_app())
+
+
+def route(url=None, route_name=None):
+    def decorated(func):
+        nonlocal url, route_name
+        if not url:
+            url = func.__module__ + '/'
+            if url == '__main__/':
+                url = ''
+            url += func.__name__ + '/'
+            if func.__name__ == 'index':
+                url = url.replace(func.__name__ + '/', '')
+        if url[-1] != '/':
+            url += '/'
+        if not route_name:
+            route_name = url
+        if route_name not in urls:
+            urls[route_name] = (re.compile(url), func)
+
+        def wrapped(*args, **kwargs):
+            return func(*args, **kwargs)
+
+        return wrapped
+
+    return decorated
+
+
+def app(env, start_response):
+    if env['PATH_INFO'][-1] != '/':
+        start_response('301 Moved Permanently', [('Location', env['PATH_INFO'] + '/')])
+        return [b'']
+    if env['PATH_INFO'] not in __route_cache:
+        for name, url in urls.items():
+            m = url[0].fullmatch(env['PATH_INFO'][1:])
+            if m:
+                __route_cache[env['PATH_INFO']] = (url[1], m.groups())
+                break
+    if env['PATH_INFO'] not in __route_cache:
+        start_response('404 Not Found', [])
+        return [b'']
+    f = __route_cache[env['PATH_INFO']]
+    body = None
+    headers = {'Content-type': 'text/html; charset=utf-8'}
+    status = '200 OK'
+    result = f[0](env, *f[1])
+    if result:
+        def process_headers(request_headers):
+            if isinstance(request_headers, dict):
+                headers.update(request_headers)
+            elif isinstance(request_headers, tuple):
+                headers.update(dict(request_headers))
+            elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
+                headers.update({r[0]: r[1] for r in result})
+
+        if isinstance(result, (tuple, type(namedtuple), list)):
+            body = result[0]
+            if len(result) > 1 and result[1]:
+                status = statuses[result[1]] if isinstance(result[1], int) else result[1]
+                if len(result) > 2 and result[2]:
+                    process_headers(result[2])
+        elif isinstance(result, dict):
+            if 'body' in result:
+                body = result['body']
+            if 'status' in result:
+                status = statuses[result['status']] if isinstance(result['status'], int) else result['status']
+            if 'headers' in result:
+                process_headers(result['headers'])
+        elif isinstance(result, (str, bytes)):
+            body = result
+
+    start_response(status, [(k, v) for k, v in headers.items()])
+    return body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
+
+
+def start_server(application=app, bind='0.0.0.0', port=8000, *, handler=WSGIRequestHandler):
+    server = WSGIServer((bind, port), handler)
+    server.set_app(application)
+    server.serve_forever()
+
+
+if __name__ == '__main__':
+    parser = ArgumentParser()
+    parser.add_argument('-b', '--bind', default='0.0.0.0')
+    parser.add_argument('-p', '--port', default=8000, type=int)
+    parser = parser.parse_args()
+    start_server(app, parser.bind, parser.port)

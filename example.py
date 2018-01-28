@@ -11,7 +11,7 @@ def other(request):
     return 'Other', None, {'Testing': 'Header'}
 
 
-@route('other/txt')
+@route('other/txt', methods=['post'])
 def another(request):
     return 'Txt', 204
 

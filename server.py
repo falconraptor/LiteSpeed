@@ -1,15 +1,13 @@
+import json
+import re
 import socket
+import sys
 from argparse import ArgumentParser
 from collections import namedtuple
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingTCPServer
 from urllib.parse import unquote
-
 from wsgiref.handlers import SimpleHandler
-
-import re
-
-import sys
 
 urls = {}
 __route_cache = {}
@@ -65,6 +63,29 @@ statuses = {
 }
 
 
+def json_serial(obj):
+    """JSON serializer for objects not serializable by default json code"""
+    try:
+        if hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        if isinstance(obj, set) or isinstance(obj, tuple):
+            return list(obj)
+        if isinstance(obj, bytes):
+            return ''.join(map(chr, obj))
+        if hasattr(obj, '__dict__'):
+            return obj.__dict__
+        if hasattr(obj, '__str__'):
+            return obj.__str__()
+        if isinstance(obj, type(dict().items())):
+            return dict(obj)
+        raise TypeError('Type not serializable ({})'.format(type(obj)))
+    except Exception as e:
+        raise TypeError('Type not serializable ({}) [{}]'.format(type(obj), e.__str__()))
+
+
+json_map = json_serial
+
+
 class WSGIServer(ThreadingTCPServer):
     request_queue_size = 500
     allow_reuse_address = True
@@ -99,7 +120,6 @@ class ServerHandler(SimpleHandler):
 
 
 class WSGIRequestHandler(BaseHTTPRequestHandler):
-
     def __init__(self, request, client_address, server):
         super().__init__(request, client_address, server)
         self.raw_requestline = ''
@@ -137,7 +157,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         handler.run(self.server.get_app())
 
 
-def route(url=None, route_name=None):
+def route(url=None, route_name=None, methods='*'):
     def decorated(func):
         nonlocal url, route_name
         if not url:
@@ -152,7 +172,9 @@ def route(url=None, route_name=None):
         if not route_name:
             route_name = url
         if route_name not in urls:
-            urls[route_name] = (re.compile(url), func)
+            func.re = re.compile(url)
+            func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else {methods}
+            urls[route_name] = func
 
         def wrapped(*args, **kwargs):
             return func(*args, **kwargs)
@@ -168,16 +190,19 @@ def app(env, start_response):
         return [b'']
     if env['PATH_INFO'] not in __route_cache:
         for name, url in urls.items():
-            m = url[0].fullmatch(env['PATH_INFO'][1:])
+            m = url.re.fullmatch(env['PATH_INFO'][1:])
             if m:
-                __route_cache[env['PATH_INFO']] = (url[1], m.groups())
+                __route_cache[env['PATH_INFO']] = (url, m.groups())
                 break
     if env['PATH_INFO'] not in __route_cache:
-        start_response('404 Not Found', [])
+        start_response('404 Not Found', [('Content-Type', 'text/html; charset=utf-8')])
         return [b'']
     f = __route_cache[env['PATH_INFO']]
+    if f[0].methods != '*' and env['REQUEST_METHOD'].lower() not in f[0].methods:
+        start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
+        return [b'']
     body = None
-    headers = {'Content-type': 'text/html; charset=utf-8'}
+    headers = {'Content-Type': 'text/html; charset=utf-8'}
     status = '200 OK'
     result = f[0](env, *f[1])
     if result:
@@ -202,6 +227,8 @@ def app(env, start_response):
                 status = statuses[result['status']] if isinstance(result['status'], int) else result['status']
             if 'headers' in result:
                 process_headers(result['headers'])
+            if not (body or status != '200 OK' or headers != {'Content-Type': 'text/html; charset=utf-8'}):
+                body = json.dumps(result, default=json_map).encode()
         elif isinstance(result, (str, bytes)):
             body = result
 

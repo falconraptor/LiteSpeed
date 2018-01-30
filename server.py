@@ -128,7 +128,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         self.command = ''
 
     def get_environ(self):
-        env = {'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command}
+        env = {'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command, 'BODY': [], 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}}
         path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
         env['PATH_INFO'] = unquote(path, 'iso-8859-1')
         host = self.address_string()
@@ -139,6 +139,62 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         length = self.headers.get('content-length')
         if length:
             env['CONTENT_LENGTH'] = length
+        boundary = re.findall(r'boundary=-*([\w]+)', env['CONTENT_TYPE'])
+        if boundary:
+            boundary = boundary[0] + '--'
+            line, content, name, filename = '', '', '', ''
+            dashes = re.compile(r'-*')
+            re_name = re.compile(r'name="([\w]+)"')
+            re_filename = re.compile(r'filename="([\w.\-]+)"')
+            file = None
+            skip_first = True
+            while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
+                line = self.rfile.readline()
+                try:
+                    decoded = line.decode().replace('\r', '').replace('\n', '')
+                    if decoded:
+                        if dashes.sub('', decoded, 1) in {boundary[:-2], boundary}:
+                            name, filename, content = '', '', ''
+                            skip_first = True
+                            if file:
+                                file.close()
+                        if not content:
+                            if not name:
+                                name = re_name.findall(decoded)
+                                if name:
+                                    name = name[0]
+                            if not filename:
+                                filename = re_filename.findall(decoded)
+                                if filename:
+                                    filename = filename[0]
+                                    file = open(filename, 'bw')
+                            if decoded.startswith('Content-Type'):
+                                content = decoded.split(' ')[-1]
+                    if not content:
+                        line = decoded
+                except UnicodeDecodeError:
+                    pass
+                env['BODY'].append(line)
+                if content and ((decoded and not decoded.startswith('Content-Type')) or not decoded):
+                    if name not in env['FILES']:
+                        env['FILES'][name] = filename
+                    if not skip_first:
+                        file.write(line)
+                    else:
+                        skip_first = False
+                elif name and ((decoded and not re_name.findall(decoded)) or decoded != line) and not filename:
+                    env[self.command][name] = decoded if decoded and dashes.sub('', decoded, 1) != boundary else line
+                    name = ''
+        if env['QUERY_STRING']:
+            for q in env['QUERY_STRING'].split('&'):
+                k, v = q.split('=') if '=' in q else (q, None)
+                if k in env['GET']:
+                    try:
+                        env['GET'][k].append(v)
+                    except AttributeError:
+                        env['GET'][k] = [env['GET'][k], v]
+                else:
+                    env['GET'][k] = v
         env.update({k.replace('-', '_').upper(): v.strip() for k, v in self.headers.items() if k.replace('-', '_').upper() not in env})
         return env
 
@@ -167,13 +223,13 @@ def route(url=None, route_name=None, methods='*'):
             url += func.__name__ + '/'
             if func.__name__ == 'index':
                 url = url.replace(func.__name__ + '/', '')
-        if url[-1] != '/':
+        if not url or url[-1] != '/':
             url += '/'
         if not route_name:
             route_name = url
         if route_name not in urls:
             func.re = re.compile(url)
-            func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else {methods}
+            func.methods = [m.lower() for m in methods] if isinstance(methods, (list, set, dict, tuple)) else [methods]
             urls[route_name] = func
 
         def wrapped(*args, **kwargs):
@@ -190,7 +246,7 @@ def app(env, start_response):
         return [b'']
     if env['PATH_INFO'] not in __route_cache:
         for name, url in urls.items():
-            m = url.re.fullmatch(env['PATH_INFO'][1:])
+            m = url.re.fullmatch(env['PATH_INFO'][1:]) or url.re.fullmatch(env['PATH_INFO'])
             if m:
                 __route_cache[env['PATH_INFO']] = (url, m.groups())
                 break
@@ -198,11 +254,11 @@ def app(env, start_response):
         start_response('404 Not Found', [('Content-Type', 'text/html; charset=utf-8')])
         return [b'']
     f = __route_cache[env['PATH_INFO']]
-    if f[0].methods != '*' and env['REQUEST_METHOD'].lower() not in f[0].methods:
+    if f[0].methods[0] != '*' and env['REQUEST_METHOD'].lower() not in set(f[0].methods):
         start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
         return [b'']
-    body = None
-    headers = {'Content-Type': 'text/html; charset=utf-8'}
+    body = ''
+    headers = {}
     status = '200 OK'
     result = f[0](env, *f[1])
     if result:
@@ -227,11 +283,14 @@ def app(env, start_response):
                 status = statuses[result['status']] if isinstance(result['status'], int) else result['status']
             if 'headers' in result:
                 process_headers(result['headers'])
-            if not (body or status != '200 OK' or headers != {'Content-Type': 'text/html; charset=utf-8'}):
+            if not (body or status != '200 OK' or headers):
                 body = json.dumps(result, default=json_map).encode()
+                headers['Content-Type'] = 'application/json; charset=utf-8'
         elif isinstance(result, (str, bytes)):
             body = result
 
+    if 'Content-Type' not in headers:
+        headers['Content-Type'] = 'text/html; charset=utf-8'
     start_response(status, [(k, v) for k, v in headers.items()])
     return body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
 

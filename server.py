@@ -228,6 +228,7 @@ def route(url=None, route_name=None, methods='*'):
         if not route_name:
             route_name = url
         if route_name not in urls:
+            func.url = url
             func.re = re.compile(url)
             func.methods = [m.lower() for m in methods] if isinstance(methods, (list, set, dict, tuple)) else [methods]
             urls[route_name] = func
@@ -271,8 +272,8 @@ def app(env, start_response):
                 headers.update({r[0]: r[1] for r in result})
 
         if isinstance(result, (tuple, type(namedtuple), list)):
-            body = result[0]
-            if len(result) > 1 and result[1]:
+            body = result[0] if len(result) <= 3 else result
+            if 3 >= len(result) > 1 and result[1]:
                 status = statuses[result[1]] if isinstance(result[1], int) else result[1]
                 if len(result) > 2 and result[2]:
                     process_headers(result[2])
@@ -292,7 +293,7 @@ def app(env, start_response):
     if 'Content-Type' not in headers:
         headers['Content-Type'] = 'text/html; charset=utf-8'
     start_response(status, [(k, v) for k, v in headers.items()])
-    return body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
+    return body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
 
 
 def start_server(application=app, bind='0.0.0.0', port=8000, *, handler=WSGIRequestHandler):
@@ -302,6 +303,9 @@ def start_server(application=app, bind='0.0.0.0', port=8000, *, handler=WSGIRequ
 
 
 if __name__ == '__main__':
+    @route()
+    def index(request):
+        return [b'Not Implemented']
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default='0.0.0.0')
     parser.add_argument('-p', '--port', default=8000, type=int)

@@ -1,4 +1,4 @@
-from server import route, start_server
+from server import route, start_server, urls
 
 
 @route()
@@ -24,6 +24,16 @@ def json(request):
 @route('(\d{2})')
 def test2(request, num):
     return 'Test2 [{}]'.format(num)
+
+
+@route()
+def index(request):
+    return ['<a href="{}">{}</a><br>'.format(func.url, name) for name, func in urls.items()]
+
+
+@route()
+def index2(request):  # for use when len(urls) <= 3
+    return ['<a href="{}">{}</a><br>'.format(func.url, name) for name, func in urls.items()], 200
 
 
 if __name__ == '__main__':

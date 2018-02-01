@@ -128,7 +128,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         self.command = ''
 
     def get_environ(self):
-        env = {'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command, 'BODY': [], 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}}
+        env = {'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}}
         path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
         env['PATH_INFO'] = unquote(path, 'iso-8859-1')
         host = self.address_string()
@@ -136,9 +136,9 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
             env['REMOTE_HOST'] = host
         env['REMOTE_ADDR'] = self.client_address[0]
         env['CONTENT_TYPE'] = self.headers.get_content_type() if not self.headers.get('content-type') else self.headers['content-type']
-        length = self.headers.get('content-length')
-        if length:
-            env['CONTENT_LENGTH'] = length
+        env['CONTENT_LENGTH'] = int(self.headers.get('content-length', '0'))
+        while len(env['BODY']) != env['CONTENT_LENGTH']:
+            env['BODY'] += self.rfile.read(1)
         boundary = re.findall(r'boundary=-*([\w]+)', env['CONTENT_TYPE'])
         if boundary:
             boundary = boundary[0] + '--'
@@ -148,8 +148,11 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
             re_filename = re.compile(r'filename="([\w.\-]+)"')
             file = None
             skip_first = True
+            body = env['BODY'].split('\n')
+            index = 0
+            env['BODY'] = []
             while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
-                line = self.rfile.readline()
+                line = body[index]
                 try:
                     decoded = line.decode().replace('\r', '').replace('\n', '')
                     if decoded:
@@ -183,8 +186,11 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
                     else:
                         skip_first = False
                 elif name and ((decoded and not re_name.findall(decoded)) or decoded != line) and not filename:
-                    env[self.command][name] = decoded if decoded and dashes.sub('', decoded, 1) != boundary else line
+                    env[env['REQUEST_METHOD']][name] = decoded if decoded and dashes.sub('', decoded, 1) != boundary else line
                     name = ''
+            index += 1
+        elif env['CONTENT_TYPE'].lower() == 'application/json' and env['BODY']:
+            env[env['REQUEST_METHOD']] = json.loads(env['BODY'])
         if env['QUERY_STRING']:
             for q in env['QUERY_STRING'].split('&'):
                 k, v = q.split('=') if '=' in q else (q, None)
@@ -243,7 +249,7 @@ def route(url=None, route_name=None, methods='*'):
 
 def app(env, start_response):
     if env['PATH_INFO'][-1] != '/':
-        start_response('301 Moved Permanently', [('Location', env['PATH_INFO'] + '/')])
+        start_response('307 Moved Permanently', [('Location', env['PATH_INFO'] + '/')])
         return [b'']
     if env['PATH_INFO'] not in __route_cache:
         for name, url in urls.items():

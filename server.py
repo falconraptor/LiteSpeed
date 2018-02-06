@@ -6,7 +6,7 @@ from argparse import ArgumentParser
 from collections import namedtuple
 from http.server import BaseHTTPRequestHandler
 from socketserver import ThreadingTCPServer
-from urllib.parse import unquote
+from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
 
 urls = {}
@@ -191,6 +191,17 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
             index += 1
         elif env['CONTENT_TYPE'].lower() == 'application/json' and env['BODY']:
             env[env['REQUEST_METHOD']] = json.loads(env['BODY'])
+        elif env['CONTENT_TYPE'].lower() == 'application/x-www-form-urlencoded':
+            for q in env['BODY'].decode().split('&'):
+                q = q.split('=') if '=' in q else (q, None)
+                k, v = [unquote_plus(a) if a else a for a in q]
+                if k in env[env['REQUEST_METHOD']]:
+                    try:
+                        env[env['REQUEST_METHOD']][k].append(v)
+                    except AttributeError:
+                        env[env['REQUEST_METHOD']][k] = [env[env['REQUEST_METHOD']][k], v]
+                else:
+                    env[env['REQUEST_METHOD']][k] = v
         if env['QUERY_STRING']:
             for q in env['QUERY_STRING'].split('&'):
                 k, v = q.split('=') if '=' in q else (q, None)
@@ -236,7 +247,7 @@ def route(url=None, route_name=None, methods='*'):
         if route_name not in urls:
             func.url = url
             func.re = re.compile(url)
-            func.methods = [m.lower() for m in methods] if isinstance(methods, (list, set, dict, tuple)) else [methods]
+            func.methods = [m.lower() for m in methods] if isinstance(methods, (list, set, dict, tuple)) else methods.split(',')
             urls[route_name] = func
 
         def wrapped(*args, **kwargs):

@@ -230,7 +230,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         handler.run(self.server.get_app())
 
 
-def route(url=None, route_name=None, methods='*'):
+def route(url=None, route_name=None, methods='*', f=None):
     def decorated(func):
         nonlocal url, route_name
         if not url:
@@ -255,6 +255,8 @@ def route(url=None, route_name=None, methods='*'):
 
         return wrapped
 
+    if f:
+        decorated(f)
     return decorated
 
 
@@ -266,7 +268,11 @@ def app(env, start_response):
         for name, url in urls.items():
             m = url.re.fullmatch(env['PATH_INFO'][1:]) or url.re.fullmatch(env['PATH_INFO'])
             if m:
-                __route_cache[env['PATH_INFO']] = (url, m.groups())
+                groups = m.groups()
+                for key, value in m.groupdict().items():
+                    if value in groups:
+                        groups = (g for g in groups if g != value)
+                __route_cache[env['PATH_INFO']] = (url, groups, m.groupdict())
                 break
     if env['PATH_INFO'] not in __route_cache:
         start_response('404 Not Found', [('Content-Type', 'text/html; charset=utf-8')])
@@ -278,7 +284,7 @@ def app(env, start_response):
     body = ''
     headers = {}
     status = '200 OK'
-    result = f[0](env, *f[1])
+    result = f[0](env, *f[1], **f[2])
     if result:
         def process_headers(request_headers):
             if isinstance(request_headers, dict):
@@ -316,6 +322,7 @@ def app(env, start_response):
 def start_server(application=app, bind='0.0.0.0', port=8000, *, handler=WSGIRequestHandler):
     server = WSGIServer((bind, port), handler)
     server.set_app(application)
+    print('Server Started on', '{}:{}'.format(bind, port))
     server.serve_forever()
 
 

@@ -4,7 +4,9 @@ import socket
 import sys
 from argparse import ArgumentParser
 from collections import namedtuple
+from gzip import GzipFile
 from http.server import BaseHTTPRequestHandler
+from io import BytesIO
 from socketserver import ThreadingTCPServer
 from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
@@ -61,6 +63,7 @@ statuses = {
     510: '510 Not Extended',
     511: '511 Network Authentication Required'
 }
+cors_origin_allow = []
 
 
 def json_serial(obj):
@@ -68,7 +71,7 @@ def json_serial(obj):
     try:
         if hasattr(obj, 'isoformat'):
             return obj.isoformat()
-        if isinstance(obj, set) or isinstance(obj, tuple):
+        if isinstance(obj, (set, tuple)):
             return list(obj)
         if isinstance(obj, bytes):
             return ''.join(map(chr, obj))
@@ -140,6 +143,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         while len(env['BODY']) != env['CONTENT_LENGTH']:
             env['BODY'] += self.rfile.read(1)
         boundary = re.findall(r'boundary=-*([\w]+)', env['CONTENT_TYPE'])
+        content_type = env['CONTENT_TYPE'].lower()
         if boundary:
             boundary = boundary[0] + '--'
             line, content, name, filename = '', '', '', ''
@@ -149,10 +153,10 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
             file = None
             skip_first = True
             body = env['BODY'].split('\n')
-            index = 0
+            i = 0
             env['BODY'] = []
             while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
-                line = body[index]
+                line = body[i]
                 try:
                     decoded = line.decode().replace('\r', '').replace('\n', '')
                     if decoded:
@@ -188,30 +192,32 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
                 elif name and ((decoded and not re_name.findall(decoded)) or decoded != line) and not filename:
                     env[env['REQUEST_METHOD']][name] = decoded if decoded and dashes.sub('', decoded, 1) != boundary else line
                     name = ''
-            index += 1
-        elif env['CONTENT_TYPE'].lower() == 'application/json' and env['BODY']:
+            i += 1
+        elif content_type == 'application/json' and env['BODY']:
             env[env['REQUEST_METHOD']] = json.loads(env['BODY'])
-        elif env['CONTENT_TYPE'].lower() == 'application/x-www-form-urlencoded':
+        elif content_type == 'application/x-www-form-urlencoded':
             for q in env['BODY'].decode().split('&'):
                 q = q.split('=') if '=' in q else (q, None)
                 k, v = [unquote_plus(a) if a else a for a in q]
-                if k in env[env['REQUEST_METHOD']]:
+                request_method = env[env['REQUEST_METHOD']]
+                if k in request_method:
                     try:
-                        env[env['REQUEST_METHOD']][k].append(v)
+                        request_method[k].append(v)
                     except AttributeError:
-                        env[env['REQUEST_METHOD']][k] = [env[env['REQUEST_METHOD']][k], v]
+                        request_method[k] = [request_method[k], v]
                 else:
-                    env[env['REQUEST_METHOD']][k] = v
+                    request_method[k] = v
         if env['QUERY_STRING']:
             for q in env['QUERY_STRING'].split('&'):
                 k, v = q.split('=') if '=' in q else (q, None)
-                if k in env['GET']:
+                get = env['GET']
+                if k in get:
                     try:
-                        env['GET'][k].append(v)
+                        get[k].append(v)
                     except AttributeError:
-                        env['GET'][k] = [env['GET'][k], v]
+                        get[k] = [get[k], v]
                 else:
-                    env['GET'][k] = v
+                    get[k] = v
         env.update({k.replace('-', '_').upper(): v.strip() for k, v in self.headers.items() if k.replace('-', '_').upper() not in env})
         return env
 
@@ -234,12 +240,7 @@ def route(url=None, route_name=None, methods='*', f=None):
     def decorated(func):
         nonlocal url, route_name
         if not url:
-            url = func.__module__ + '/'
-            if url == '__main__/':
-                url = ''
-            url += func.__name__ + '/'
-            if func.__name__ == 'index':
-                url = url.replace(func.__name__ + '/', '')
+            url = (func.__module__ + '/').replace('__main__/', '') + (func.__name__ + '/').replace('index/', '')
         if not url or url[-1] != '/':
             url += '/'
         if not route_name:
@@ -260,31 +261,44 @@ def route(url=None, route_name=None, methods='*', f=None):
     return decorated
 
 
+def compress_string(s):
+    zbuf = BytesIO()
+    with GzipFile(mode='wb', compresslevel=6, fileobj=zbuf, mtime=0) as zfile:
+        zfile.write(s)
+    return zbuf.getvalue()
+
+
 def app(env, start_response):
-    if env['PATH_INFO'][-1] != '/':
-        start_response('307 Moved Permanently', [('Location', env['PATH_INFO'] + '/')])
+    path = env['PATH_INFO']
+    if path[-1] != '/':
+        start_response('307 Moved Permanently', [('Location', path + '/')])
         return [b'']
-    if env['PATH_INFO'] not in __route_cache:
+    if path not in __route_cache:
         for name, url in urls.items():
-            m = url.re.fullmatch(env['PATH_INFO'][1:]) or url.re.fullmatch(env['PATH_INFO'])
+            m = url.re.fullmatch(path[1:]) or url.re.fullmatch(path)
             if m:
                 groups = m.groups()
                 for key, value in m.groupdict().items():
                     if value in groups:
                         groups = (g for g in groups if g != value)
-                __route_cache[env['PATH_INFO']] = (url, groups, m.groupdict())
+                __route_cache[path] = (url, groups, m.groupdict())
                 break
-    if env['PATH_INFO'] not in __route_cache:
+    if path not in __route_cache:
         start_response('404 Not Found', [('Content-Type', 'text/html; charset=utf-8')])
         return [b'']
-    f = __route_cache[env['PATH_INFO']]
+    f = __route_cache[path]
     if f[0].methods[0] != '*' and env['REQUEST_METHOD'].lower() not in set(f[0].methods):
         start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
         return [b'']
     body = ''
     headers = {}
     status = '200 OK'
-    result = f[0](env, *f[1], **f[2])
+    try:
+        result = f[0](env, *f[1], **f[2])
+    except Exception as e:
+        raise e
+        # start_response('500 Internal Server Error', [('Content-Type', 'application/json; charset=utf-8')])
+        # return [json.dumps({'Errors': e.args}, default=json_map).encode()]
     if result:
         def process_headers(request_headers):
             if isinstance(request_headers, dict):
@@ -300,6 +314,9 @@ def app(env, start_response):
                 status = statuses[result[1]] if isinstance(result[1], int) else result[1]
                 if len(result) > 2 and result[2]:
                     process_headers(result[2])
+            if isinstance(body, dict):
+                body = json.dumps(body, default=json_map).encode()
+                headers['Content-Type'] = 'application/json; charset=utf-8'
         elif isinstance(result, dict):
             if 'body' in result:
                 body = result['body']
@@ -315,23 +332,47 @@ def app(env, start_response):
 
     if 'Content-Type' not in headers:
         headers['Content-Type'] = 'text/html; charset=utf-8'
+    if cors_origin_allow:
+        if '*' in cors_origin_allow:
+            headers['Access-Control-Allow-Origin'] = '*'
+        elif env.get('ORIGIN') in cors_origin_allow:
+            headers['Access-Control-Allow-Origin'] = env['ORIGIN']
+    body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
+    l = len(body[0])
+    if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and l > 200:
+        compressed_body = compress_string(body[0])
+        cl = len(compressed_body)
+        if cl < l:
+            body = [compressed_body]
+        # print(l, cl)
+        headers['Content-Length'] = str(cl)
+        headers['Content-Encoding'] = 'gzip'
     start_response(status, [(k, v) for k, v in headers.items()])
-    return body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
+    return body
 
 
-def start_server(application=app, bind='0.0.0.0', port=8000, *, handler=WSGIRequestHandler):
+def start_server(application=app, bind='0', port=8000, cors_allow_origin='', *, handler=WSGIRequestHandler):
+    global cors_origin_allow
     server = WSGIServer((bind, port), handler)
     server.set_app(application)
+    cors_origin_allow = cors_allow_origin.split(',')
     print('Server Started on', '{}:{}'.format(bind, port))
     server.serve_forever()
+
+
+def start_with_args(app=app, bind_default='0', port_default=8005, cors_allow_origin=''):
+    parser = ArgumentParser()
+    parser.add_argument('-b', '--bind', default=bind_default)
+    parser.add_argument('-p', '--port', default=port_default, type=int)
+    parser.add_argument('--cors_allow_origin', default=cors_allow_origin)
+    parser = parser.parse_args()
+    start_server(app, parser.bind, parser.port, parser.cors_allow_origin)
 
 
 if __name__ == '__main__':
     @route()
     def index(request):
         return [b'Not Implemented']
-    parser = ArgumentParser()
-    parser.add_argument('-b', '--bind', default='0.0.0.0')
-    parser.add_argument('-p', '--port', default=8000, type=int)
-    parser = parser.parse_args()
-    start_server(app, parser.bind, parser.port)
+
+
+    start_with_args()

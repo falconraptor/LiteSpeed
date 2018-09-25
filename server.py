@@ -1,7 +1,6 @@
 import json
 import re
 import socket
-import sys
 from argparse import ArgumentParser
 from collections import namedtuple
 from gzip import GzipFile
@@ -10,6 +9,8 @@ from io import BytesIO
 from socketserver import ThreadingTCPServer
 from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
+
+import sys
 
 urls = {}
 __route_cache = {}
@@ -64,6 +65,7 @@ statuses = {
     511: '511 Network Authentication Required'
 }
 cors_origin_allow = []
+cors_methods_allow = []
 
 
 def json_serial(obj):
@@ -209,7 +211,8 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
                     request_method[k] = v
         if env['QUERY_STRING']:
             for q in env['QUERY_STRING'].split('&'):
-                k, v = q.split('=') if '=' in q else (q, None)
+                q = q.split('=') if '=' in q else (q, None)
+                k, v = [unquote_plus(a) if a else a for a in q]
                 get = env['GET']
                 if k in get:
                     try:
@@ -236,7 +239,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         handler.run(self.server.get_app())
 
 
-def route(url=None, route_name=None, methods='*', f=None):
+def route(url=None, route_name=None, methods='*', cors=None, cors_methods=None, f=None):
     def decorated(func):
         nonlocal url, route_name
         if not url:
@@ -249,6 +252,8 @@ def route(url=None, route_name=None, methods='*', f=None):
             func.url = url
             func.re = re.compile(url)
             func.methods = [m.lower() for m in methods] if isinstance(methods, (list, set, dict, tuple)) else methods.split(',')
+            func.cors = cors
+            func.cors_methods = cors_methods
             urls[route_name] = func
 
         def wrapped(*args, **kwargs):
@@ -293,6 +298,26 @@ def app(env, start_response):
     body = ''
     headers = {}
     status = '200 OK'
+    cors = f.cors or cors_origin_allow
+    if cors:
+        cors = cors.lower()
+        if '*' in cors:
+            headers['Access-Control-Allow-Origin'] = '*'
+        elif env.get('ORIGIN').lower() in cors:
+            headers['Access-Control-Allow-Origin'] = env['ORIGIN']
+        else:
+            start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
+            return [b'']
+        methods = f.cors_methods or cors_methods_allow
+        if methods:
+            methods = methods.lower()
+            if '*' in methods:
+                headers['Access-Control-Allow-Method'] = '*'
+            elif env['REQUEST_METHOD'].lower() in methods:
+                headers['Access-Control-Allow-Method'] = env['REQUEST_METHOD']
+            else:
+                start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
+                return [b'']
     try:
         result = f[0](env, *f[1], **f[2])
     except Exception as e:
@@ -307,7 +332,6 @@ def app(env, start_response):
                 headers.update(dict(request_headers))
             elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
                 headers.update({r[0]: r[1] for r in result})
-
         if isinstance(result, (tuple, type(namedtuple), list)):
             body = result[0] if len(result) <= 3 else result
             if 3 >= len(result) > 1 and result[1]:
@@ -329,14 +353,8 @@ def app(env, start_response):
                 headers['Content-Type'] = 'application/json; charset=utf-8'
         elif isinstance(result, (str, bytes)):
             body = result
-
     if 'Content-Type' not in headers:
         headers['Content-Type'] = 'text/html; charset=utf-8'
-    if cors_origin_allow:
-        if '*' in cors_origin_allow:
-            headers['Access-Control-Allow-Origin'] = '*'
-        elif env.get('ORIGIN') in cors_origin_allow:
-            headers['Access-Control-Allow-Origin'] = env['ORIGIN']
     body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
     l = len(body[0])
     if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and l > 200:
@@ -351,28 +369,31 @@ def app(env, start_response):
     return body
 
 
-def start_server(application=app, bind='0', port=8000, cors_allow_origin='', *, handler=WSGIRequestHandler):
-    global cors_origin_allow
+def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cors_methods='', *, handler=WSGIRequestHandler):
+    global cors_origin_allow, cors_methods_allow
     server = WSGIServer((bind, port), handler)
     server.set_app(application)
     cors_origin_allow = cors_allow_origin.split(',')
+    cors_methods_allow = cors_methods.split(',')
     print('Server Started on', '{}:{}'.format(bind, port))
-    server.serve_forever()
+    try:
+        server.serve_forever(.1)
+    except KeyboardInterrupt:
+        server.shutdown()
 
 
-def start_with_args(app=app, bind_default='0', port_default=8005, cors_allow_origin=''):
+def start_with_args(app=app, bind_default='0', port_default=8000, cors_allow_origin='', cors_methods=''):
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default=bind_default)
     parser.add_argument('-p', '--port', default=port_default, type=int)
     parser.add_argument('--cors_allow_origin', default=cors_allow_origin)
+    parser.add_argument('--cors_methods', default=cors_methods)
     parser = parser.parse_args()
-    start_server(app, parser.bind, parser.port, parser.cors_allow_origin)
+    start_server(app, parser.bind, parser.port, parser.cors_allow_origin, parser.cors_methods)
 
 
 if __name__ == '__main__':
     @route()
     def index(request):
         return [b'Not Implemented']
-
-
     start_with_args()

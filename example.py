@@ -1,4 +1,4 @@
-from server import route, start_server, urls
+from server import route, serve, start_server, urls
 
 
 @route()
@@ -39,6 +39,16 @@ def index2(request):  # for use when len(urls) <= 3
 @route('(?P<year>\d{4})/(?P<article>\d+)')
 def article(request, article, year):
     return 'This is article {} from year {}'.format(article, year)
+
+
+@route()
+def readme(request):
+    return serve('README.md')
+
+
+@route('([\w.]+)')
+def file(request, file):
+    return serve(file)
 
 
 route('num/(?P<num>\d+)', f=test2)

@@ -1,3 +1,3 @@
-from server import start_server, urls, route
+from server import route, serve, start_server, urls
 
-__all__ = ['start_server', 'urls', 'route']
+__all__ = ['start_server', 'urls', 'route', 'serve']

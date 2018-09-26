@@ -1,6 +1,7 @@
 import json
 import re
 import socket
+import sys
 from argparse import ArgumentParser
 from collections import namedtuple
 from gzip import GzipFile
@@ -9,8 +10,6 @@ from io import BytesIO
 from socketserver import ThreadingTCPServer
 from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
-
-import sys
 
 urls = {}
 __route_cache = {}
@@ -252,8 +251,8 @@ def route(url=None, route_name=None, methods='*', cors=None, cors_methods=None, 
             func.url = url
             func.re = re.compile(url)
             func.methods = [m.lower() for m in methods] if isinstance(methods, (list, set, dict, tuple)) else methods.split(',')
-            func.cors = cors
-            func.cors_methods = cors_methods
+            func.cors = [c for c in cors.lower().strip().split(',') if c] if cors else None
+            func.cors_methods = [c for c in cors_methods.lower().strip().split(',') if c] if cors_methods else None
             urls[route_name] = func
 
         def wrapped(*args, **kwargs):
@@ -298,19 +297,17 @@ def app(env, start_response):
     body = ''
     headers = {}
     status = '200 OK'
-    cors = f.cors or cors_origin_allow
+    cors = f[0].cors or cors_origin_allow
     if cors:
-        cors = cors.lower()
         if '*' in cors:
             headers['Access-Control-Allow-Origin'] = '*'
-        elif env.get('ORIGIN').lower() in cors:
+        elif env.get('ORIGIN', '').lower() in cors:
             headers['Access-Control-Allow-Origin'] = env['ORIGIN']
         else:
             start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
             return [b'']
-        methods = f.cors_methods or cors_methods_allow
+        methods = f[0].cors_methods or cors_methods_allow
         if methods:
-            methods = methods.lower()
             if '*' in methods:
                 headers['Access-Control-Allow-Method'] = '*'
             elif env['REQUEST_METHOD'].lower() in methods:
@@ -338,12 +335,16 @@ def app(env, start_response):
                 status = statuses[result[1]] if isinstance(result[1], int) else result[1]
                 if len(result) > 2 and result[2]:
                     process_headers(result[2])
+            if callable(body):
+                body = body()
             if isinstance(body, dict):
                 body = json.dumps(body, default=json_map).encode()
                 headers['Content-Type'] = 'application/json; charset=utf-8'
         elif isinstance(result, dict):
             if 'body' in result:
                 body = result['body']
+                if callable(body):
+                    body = body()
             if 'status' in result:
                 status = statuses[result['status']] if isinstance(result['status'], int) else result['status']
             if 'headers' in result:
@@ -369,12 +370,18 @@ def app(env, start_response):
     return body
 
 
+def serve(file):
+    with open(file, 'rb') as file:
+        lines = file.read()
+    return lines
+
+
 def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cors_methods='', *, handler=WSGIRequestHandler):
     global cors_origin_allow, cors_methods_allow
     server = WSGIServer((bind, port), handler)
     server.set_app(application)
-    cors_origin_allow = cors_allow_origin.split(',')
-    cors_methods_allow = cors_methods.split(',')
+    cors_origin_allow = [c for c in cors_allow_origin.lower().strip().split(',') if c]
+    cors_methods_allow = [c for c in cors_methods.lower().strip().split(',') if c]
     print('Server Started on', '{}:{}'.format(bind, port))
     try:
         server.serve_forever(.1)

@@ -5,66 +5,22 @@ import sys
 from argparse import ArgumentParser
 from collections import namedtuple
 from gzip import GzipFile
+from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
+from os.path import exists
 from socketserver import ThreadingTCPServer
 from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
 
-urls = {}
-__route_cache = {}
-statuses = {
-    100: '100 Continue',
-    101: '101 Switching Protocols',
-    200: '200 OK',
-    201: '201 Created',
-    202: '202 Accepted',
-    203: '203 Non-Authoritative Information',
-    204: '204 No Content',
-    205: '205 Reset Content',
-    206: '206 Partial Content',
-    300: '300 Multiple Choices',
-    301: '301 Moved Permanently',
-    302: '302 Found',
-    303: '303 See Other',
-    304: '304 Not Modified',
-    307: '307 Temporary Redirect',
-    308: '308 Permanent Redirect',
-    400: '400 Bad Request',
-    401: '401 Unauthorized',
-    403: '403 Forbidden',
-    404: '404 Not Found',
-    405: '405 Method Not Allowed',
-    406: '406 Not Acceptable',
-    407: '407 Proxy Authentication Required',
-    408: '408 Request Timeout',
-    409: '409 Conflict',
-    410: '410 Gone',
-    411: '411 Length Required',
-    412: '412 Precondition Failed',
-    413: '413 Payload Too Large',
-    414: '414 URI Too Long',
-    415: '415 Unsupported Media Type',
-    416: '416 Range Not Satisfiable',
-    417: '417 Expectation Failed',
-    426: '426 Upgrade Required',
-    428: '428 Precondition Required',
-    429: '429 Too Many Requests',
-    431: '431 Request Header Fields Too Large',
-    451: '451 Unavailable For Legal Reasons',
-    500: '500 Internal Server Error',
-    501: '501 Not Implemented',
-    502: '502 Bad Gateway',
-    503: '503 Service Unavailable',
-    504: '504 Gateway Timeout',
-    505: '505 HTTP Version Not Supported',
-    506: '506 Variant Also Negotiates',
-    507: '507 Insufficient Storage',
-    510: '510 Not Extended',
-    511: '511 Network Authentication Required'
-}
-cors_origin_allow = []
-cors_methods_allow = []
+__ROUTE_CACHE = {}
+COOKIE_AGE = 3600
+CORES_ORIGIN_ALLOW = set()
+CORS_METHODS_ALLOW = set()
+FAVICON = ''
+STATUS = {s.value: '{} {}'.format(s.value, s.phrase) for s in HTTPStatus}
+URLS = {}
 
 
 def json_serial(obj):
@@ -90,11 +46,26 @@ def json_serial(obj):
 json_map = json_serial
 
 
+class Request(dict):
+    def __getattribute__(self, name):
+        try:
+            return super().__getattribute__(name)
+        except AttributeError:
+            return self[name]
+
+    def set_cookie(self, name, value, expires=None, max_age=COOKIE_AGE, domain=None, path=None, secure=None, http_only=None):
+        self['COOKIE'][name] = value
+        self['COOKIE'][name].update({name: e for name, e in {'expires': expires, 'max-age': max_age, 'domain': domain, 'path': path, 'secure': secure, 'httponly': http_only}.items() if e})
+
+    def set_session(self, name, value, domain=None, path=None, secure=None, http_only=None):
+        self.set_cookie(name, value, None, 0, domain, path, secure, http_only)
+
+
 class WSGIServer(ThreadingTCPServer):
     request_queue_size = 500
     allow_reuse_address = True
     application = None
-    base_environ = {}
+    base_environ = Request()
 
     def server_bind(self):
         """Override server_bind to store the server name."""
@@ -132,14 +103,14 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         self.command = ''
 
     def get_environ(self):
-        env = {'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}}
+        env = Request({'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}, 'COOKIE': SimpleCookie()})
         path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
         env['PATH_INFO'] = unquote(path, 'iso-8859-1')
         host = self.address_string()
         if host != self.client_address[0]:
             env['REMOTE_HOST'] = host
         env['REMOTE_ADDR'] = self.client_address[0]
-        env['CONTENT_TYPE'] = self.headers.get_content_type() if not self.headers.get('content-type') else self.headers['content-type']
+        env['CONTENT_TYPE'] = self.headers.get_content_type()
         env['CONTENT_LENGTH'] = int(self.headers.get('content-length', '0'))
         while len(env['BODY']) != env['CONTENT_LENGTH']:
             env['BODY'] += self.rfile.read(1)
@@ -158,6 +129,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
             env['BODY'] = []
             while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
                 line = body[i]
+                decoded = ''
                 try:
                     decoded = line.decode().replace('\r', '').replace('\n', '')
                     if decoded:
@@ -220,6 +192,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
                         get[k] = [get[k], v]
                 else:
                     get[k] = v
+        env['COOKIE'] = SimpleCookie(self.headers.get('COOKIE'))
         env.update({k.replace('-', '_').upper(): v.strip() for k, v in self.headers.items() if k.replace('-', '_').upper() not in env})
         return env
 
@@ -247,13 +220,13 @@ def route(url=None, route_name=None, methods='*', cors=None, cors_methods=None, 
             url += '/'
         if not route_name:
             route_name = url
-        if route_name not in urls:
+        if route_name not in URLS:
             func.url = url
             func.re = re.compile(url)
-            func.methods = [m.lower() for m in methods] if isinstance(methods, (list, set, dict, tuple)) else methods.split(',')
-            func.cors = [c for c in cors.lower().strip().split(',') if c] if cors else None
-            func.cors_methods = [c for c in cors_methods.lower().strip().split(',') if c] if cors_methods else None
-            urls[route_name] = func
+            func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.split(','))
+            func.cors = {c for c in cors.lower().strip().split(',') if c} if cors else None
+            func.cors_methods = {c for c in cors_methods.lower().strip().split(',') if c} if cors_methods else None
+            URLS[route_name] = func
 
         def wrapped(*args, **kwargs):
             return func(*args, **kwargs)
@@ -273,31 +246,39 @@ def compress_string(s):
 
 
 def app(env, start_response):
+    cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
     path = env['PATH_INFO']
+    if path == '/favicon.ico':
+        if FAVICON:
+            start_response('200 OK', [])
+            return serve(FAVICON)
+        else:
+            start_response('404 Not Found', [('Content-Type', 'text/html; charset=utf-8')])
+            return [b'']
     if path[-1] != '/':
         start_response('307 Moved Permanently', [('Location', path + '/')])
         return [b'']
-    if path not in __route_cache:
-        for name, url in urls.items():
+    if path not in __ROUTE_CACHE:
+        for name, url in URLS.items():
             m = url.re.fullmatch(path[1:]) or url.re.fullmatch(path)
             if m:
                 groups = m.groups()
                 for key, value in m.groupdict().items():
                     if value in groups:
                         groups = (g for g in groups if g != value)
-                __route_cache[path] = (url, groups, m.groupdict())
+                __ROUTE_CACHE[path] = (url, groups, m.groupdict())
                 break
-    if path not in __route_cache:
+    if path not in __ROUTE_CACHE:
         start_response('404 Not Found', [('Content-Type', 'text/html; charset=utf-8')])
         return [b'']
-    f = __route_cache[path]
+    f = __ROUTE_CACHE[path]
     if f[0].methods[0] != '*' and env['REQUEST_METHOD'].lower() not in set(f[0].methods):
         start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
         return [b'']
     body = ''
     headers = {}
     status = '200 OK'
-    cors = f[0].cors or cors_origin_allow
+    cors = f[0].cors or CORES_ORIGIN_ALLOW
     if cors:
         if '*' in cors:
             headers['Access-Control-Allow-Origin'] = '*'
@@ -306,7 +287,7 @@ def app(env, start_response):
         else:
             start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
             return [b'']
-        methods = f[0].cors_methods or cors_methods_allow
+        methods = f[0].cors_methods or CORS_METHODS_ALLOW
         if methods:
             if '*' in methods:
                 headers['Access-Control-Allow-Method'] = '*'
@@ -315,6 +296,7 @@ def app(env, start_response):
             else:
                 start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
                 return [b'']
+    env = Request(env)
     try:
         result = f[0](env, *f[1], **f[2])
     except Exception as e:
@@ -330,10 +312,11 @@ def app(env, start_response):
             elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
                 headers.update({r[0]: r[1] for r in result})
         if isinstance(result, (tuple, type(namedtuple), list)):
-            body = result[0] if len(result) <= 3 else result
-            if 3 >= len(result) > 1 and result[1]:
-                status = statuses[result[1]] if isinstance(result[1], int) else result[1]
-                if len(result) > 2 and result[2]:
+            l_result = len(result)
+            body = result[0] if l_result <= 3 else result
+            if 3 >= l_result > 1 and result[1]:
+                status = STATUS[result[1]] if isinstance(result[1], int) else result[1]
+                if l_result > 2 and result[2]:
                     process_headers(result[2])
             if callable(body):
                 body = body()
@@ -346,7 +329,7 @@ def app(env, start_response):
                 if callable(body):
                     body = body()
             if 'status' in result:
-                status = statuses[result['status']] if isinstance(result['status'], int) else result['status']
+                status = STATUS[result['status']] if isinstance(result['status'], int) else result['status']
             if 'headers' in result:
                 process_headers(result['headers'])
             if not (body or status != '200 OK' or headers):
@@ -366,22 +349,28 @@ def app(env, start_response):
         # print(l, cl)
         headers['Content-Length'] = str(cl)
         headers['Content-Encoding'] = 'gzip'
-    start_response(status, [(k, v) for k, v in headers.items()])
+    headers = [(k, v) for k, v in headers.items()]
+    headers.extend(('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie)
+    start_response(status, headers)
     return body
 
 
 def serve(file):
+    if not exists(file):
+        return '', 404
     with open(file, 'rb') as file:
         lines = file.read()
     return lines
 
 
-def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cors_methods='', *, handler=WSGIRequestHandler):
-    global cors_origin_allow, cors_methods_allow
+def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cors_methods='', favicon=None, cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler):
+    global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE
     server = WSGIServer((bind, port), handler)
     server.set_app(application)
-    cors_origin_allow = [c for c in cors_allow_origin.lower().strip().split(',') if c]
-    cors_methods_allow = [c for c in cors_methods.lower().strip().split(',') if c]
+    CORES_ORIGIN_ALLOW = {c for c in cors_allow_origin.lower().strip().split(',') if c}
+    CORS_METHODS_ALLOW = {c for c in cors_methods.lower().strip().split(',') if c}
+    FAVICON = favicon
+    COOKIE_AGE = cookie_max_age
     print('Server Started on', '{}:{}'.format(bind, port))
     try:
         server.serve_forever(.1)
@@ -389,14 +378,15 @@ def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cor
         server.shutdown()
 
 
-def start_with_args(app=app, bind_default='0', port_default=8000, cors_allow_origin='', cors_methods=''):
+def start_with_args(app=app, bind_default='0', port_default=8000, cors_allow_origin='', cors_methods='', favicon='', cookie_max_age=7 * 24 * 3600):
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default=bind_default)
     parser.add_argument('-p', '--port', default=port_default, type=int)
     parser.add_argument('--cors_allow_origin', default=cors_allow_origin)
     parser.add_argument('--cors_methods', default=cors_methods)
-    parser = parser.parse_args()
-    start_server(app, parser.bind, parser.port, parser.cors_allow_origin, parser.cors_methods)
+    parser.add_argument('-f', '--favicon', default=favicon)
+    parser.add_argument('--cookie_max_age', default=cookie_max_age)
+    start_server(app, **parser.parse_args().__dict__)
 
 
 if __name__ == '__main__':

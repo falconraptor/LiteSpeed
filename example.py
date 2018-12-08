@@ -28,12 +28,12 @@ def test2(request, num):
 
 @route()  # uses method name to generate url but because it is index: /
 def index(request):
-    return ['<a href="{}">{}</a><br>'.format(func.url, name) for name, func in URLS.items()]  # return list of html which gets joined and sent to client
+    return ['<a href="{}">{}</a><br>'.format(func.url, name) for name, func in URLS.items()]  # return list of public which gets joined and sent to client
 
 
 @route()  # uses method name to generate url: /index2/
 def index2(request):  # for use when len(urls) <= 3
-    return ['<a href="{}">{}</a><br>'.format(func.url, name) for name, func in URLS.items()], 200  # return list of html which gets joined and sent to client with status 200
+    return ['<a href="{}">{}</a><br>'.format(func.url, name) for name, func in URLS.items()], 200  # return list of public which gets joined and sent to client with status 200
 
 
 @route('(?P<year>\d{4})/(?P<article>\d+)')  # use regex named groups to generate url: /[any 4 digit number]/[any number]/

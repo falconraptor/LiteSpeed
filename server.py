@@ -75,7 +75,7 @@ class WSGIServer(ThreadingTCPServer):
     @classmethod
     def setup_env(cls, port):
         if not cls.base_environ:
-            cls.base_environ = {'SERVER_NAME': socket.gethostname(), 'GATEWAY_INTERFACE': 'CGI/1.1', 'SERVER_PORT': str(port), 'REMOTE_HOST': '', 'CONTENT_LENGTH': '', 'SCRIPT_NAME': ''}
+            cls.base_environ = Request({'SERVER_NAME': socket.gethostname(), 'GATEWAY_INTERFACE': 'CGI/1.1', 'SERVER_PORT': str(port), 'REMOTE_HOST': '', 'CONTENT_LENGTH': '', 'SCRIPT_NAME': ''})
 
     def get_app(self):
         return self.application
@@ -211,12 +211,12 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
         handler.run(self.server.get_app())
 
 
-def route(url=None, route_name=None, methods='*', cors=None, cors_methods=None, f=None):
+def route(url=None, route_name=None, methods='*', cors=None, cors_methods=None, no_end_slash=False, f=None):
     def decorated(func):
         nonlocal url, route_name
         if not url:
             url = (func.__module__ + '/').replace('__main__/', '') + (func.__name__ + '/').replace('index/', '')
-        if not url or url[-1] != '/':
+        if not url or (url[-1] != '/' and '.' not in url[-5:] and not no_end_slash):
             url += '/'
         if not route_name:
             route_name = url
@@ -248,14 +248,7 @@ def compress_string(s):
 def app(env, start_response):
     cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
     path = env['PATH_INFO']
-    if path == '/favicon.ico':
-        if FAVICON:
-            start_response('200 OK', [])
-            return serve(FAVICON)
-        else:
-            start_response('404 Not Found', [('Content-Type', 'text/html; charset=utf-8')])
-            return [b'']
-    if path[-1] != '/':
+    if path[-1] != '/' and '.' not in path[-5:]:
         start_response('307 Moved Permanently', [('Location', path + '/')])
         return [b'']
     if path not in __ROUTE_CACHE:
@@ -269,11 +262,11 @@ def app(env, start_response):
                 __ROUTE_CACHE[path] = (url, groups, m.groupdict())
                 break
     if path not in __ROUTE_CACHE:
-        start_response('404 Not Found', [('Content-Type', 'text/html; charset=utf-8')])
+        start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
         return [b'']
     f = __ROUTE_CACHE[path]
-    if f[0].methods[0] != '*' and env['REQUEST_METHOD'].lower() not in set(f[0].methods):
-        start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
+    if '*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods:
+        start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
         return [b'']
     body = ''
     headers = {}
@@ -285,7 +278,7 @@ def app(env, start_response):
         elif env.get('ORIGIN', '').lower() in cors:
             headers['Access-Control-Allow-Origin'] = env['ORIGIN']
         else:
-            start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
+            start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
             return [b'']
         methods = f[0].cors_methods or CORS_METHODS_ALLOW
         if methods:
@@ -294,7 +287,7 @@ def app(env, start_response):
             elif env['REQUEST_METHOD'].lower() in methods:
                 headers['Access-Control-Allow-Method'] = env['REQUEST_METHOD']
             else:
-                start_response('405 Method Not Allowed', [('Content-Type', 'text/html; charset=utf-8')])
+                start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
                 return [b'']
     env = Request(env)
     try:
@@ -338,7 +331,7 @@ def app(env, start_response):
         elif isinstance(result, (str, bytes)):
             body = result
     if 'Content-Type' not in headers:
-        headers['Content-Type'] = 'text/html; charset=utf-8'
+        headers['Content-Type'] = 'text/public; charset=utf-8'
     body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
     l = len(body[0])
     if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and l > 200:
@@ -363,7 +356,7 @@ def serve(file):
     return lines
 
 
-def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cors_methods='', favicon=None, cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler):
+def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cors_methods='', favicon=None, cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler, serve=True):
     global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE
     server = WSGIServer((bind, port), handler)
     server.set_app(application)
@@ -372,10 +365,12 @@ def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cor
     FAVICON = favicon
     COOKIE_AGE = cookie_max_age
     print('Server Started on', '{}:{}'.format(bind, port))
-    try:
-        server.serve_forever(.1)
-    except KeyboardInterrupt:
-        server.shutdown()
+    if serve:
+        try:
+            server.serve_forever(.1)
+        except KeyboardInterrupt:
+            server.shutdown()
+    return server
 
 
 def start_with_args(app=app, bind_default='0', port_default=8000, cors_allow_origin='', cors_methods='', favicon='', cookie_max_age=7 * 24 * 3600):

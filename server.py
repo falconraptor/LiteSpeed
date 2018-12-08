@@ -356,7 +356,7 @@ def serve(file):
     return lines
 
 
-def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cors_methods='', favicon=None, cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler, serve=True):
+def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='', cors_methods='', favicon=None, cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler, serve=True):
     global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE
     server = WSGIServer((bind, port), handler)
     server.set_app(application)
@@ -373,7 +373,7 @@ def start_server(application=app, bind='0', port=8000, cors_allow_origin='', cor
     return server
 
 
-def start_with_args(app=app, bind_default='0', port_default=8000, cors_allow_origin='', cors_methods='', favicon='', cookie_max_age=7 * 24 * 3600):
+def start_with_args(app=app, bind_default='0.0.0.0', port_default=8000, cors_allow_origin='', cors_methods='', favicon='', cookie_max_age=7 * 24 * 3600):
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default=bind_default)
     parser.add_argument('-p', '--port', default=port_default, type=int)

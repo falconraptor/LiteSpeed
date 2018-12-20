@@ -331,7 +331,7 @@ def app(env, start_response):
         elif isinstance(result, (str, bytes)):
             body = result
     if 'Content-Type' not in headers:
-        headers['Content-Type'] = 'text/public; charset=utf-8'
+        headers['Content-Type'] = 'text/html; charset=utf-8'
     body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
     l = len(body[0])
     if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and l > 200:
@@ -351,9 +351,9 @@ def app(env, start_response):
 def serve(file):
     if not exists(file):
         return '', 404
-    with open(file, 'rb') as file:
-        lines = file.read()
-    return lines
+    with open(file, 'rb') as _in:
+        lines = _in.read()
+    return lines, 200, {'Content-Type': 'text/{}; charset=utf-8'.format(file.split('.')[-1])}
 
 
 def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='', cors_methods='', favicon=None, cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler, serve=True):

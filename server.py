@@ -325,7 +325,7 @@ def app(env, start_response):
                 status = STATUS[result['status']] if isinstance(result['status'], int) else result['status']
             if 'headers' in result:
                 process_headers(result['headers'])
-            if not (body or status != '200 OK' or headers):
+            if not (body or status != '200 OK'):
                 body = json.dumps(result, default=json_map).encode()
                 headers['Content-Type'] = 'application/json; charset=utf-8'
         elif isinstance(result, (str, bytes)):
@@ -354,6 +354,14 @@ def serve(file):
     with open(file, 'rb') as _in:
         lines = _in.read()
     return lines, 200, {'Content-Type': 'text/{}; charset=utf-8'.format(file.split('.')[-1])}
+
+
+def render(file, data):
+    lines, status, headers = serve(file)
+    if status == 200:
+        for key, value in data.items():
+            lines = lines.replace('~~{}~~'.format(key).encode(), value.encode())
+    return lines, status, headers
 
 
 def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='', cors_methods='', favicon=None, cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler, serve=True):

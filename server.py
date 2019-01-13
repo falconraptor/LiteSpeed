@@ -21,6 +21,23 @@ CORS_METHODS_ALLOW = set()
 FAVICON = ''
 STATUS = {s.value: '{} {}'.format(s.value, s.phrase) for s in HTTPStatus}
 URLS = {}
+EXT_MAP = {
+    'pdf': 'application/pdf',
+    'css': 'text/css',
+    'html': 'text/html',
+    'json': 'application/json',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'exe': 'application/x-msdownload',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'otf': 'application/x-font-otf',
+    'png': 'image/png',
+    'rar': 'application/x-rar-compressed',
+    'tar': 'application/x-tar',
+    'txt': 'text/plain',
+    'ttf': 'application/x-font-ttf'
+}
 
 
 def json_serial(obj):
@@ -55,10 +72,10 @@ class Request(dict):
 
     def set_cookie(self, name, value, expires=None, max_age=COOKIE_AGE, domain=None, path=None, secure=None, http_only=None):
         self['COOKIE'][name] = value
-        self['COOKIE'][name].update({name: e for name, e in {'expires': expires, 'max-age': max_age, 'domain': domain, 'path': path, 'secure': secure, 'httponly': http_only}.items() if e})
+        self['COOKIE'][name].update({name: e for name, e in {'expires': expires, 'max-age': max_age, 'domain': domain, 'path': path, 'secure': secure, 'httponly': http_only}.items() if e is not None})
 
     def set_session(self, name, value, domain=None, path=None, secure=None, http_only=None):
-        self.set_cookie(name, value, None, 0, domain, path, secure, http_only)
+        self.set_cookie(name, value, None, None, domain, path, secure, http_only)
 
 
 class WSGIServer(ThreadingTCPServer):
@@ -348,16 +365,25 @@ def app(env, start_response):
     return body
 
 
-def serve(file):
+def serve(file, cache_age=0, headers=None):
+    ext = file.split('.')[-1]
+    if not headers:
+        headers = {'Content-Type': '{}; charset=utf-8'.format(EXT_MAP.get(ext, 'application/octet-stream'))}
     if not exists(file):
         return '', 404
     with open(file, 'rb') as _in:
         lines = _in.read()
-    return lines, 200, {'Content-Type': 'text/{}; charset=utf-8'.format(file.split('.')[-1])}
+    if 'Content-Type' not in headers:
+        headers['Content-Type'] = '{}; charset=utf-8'.format(EXT_MAP.get(ext, 'application/octet-stream'))
+    if cache_age > 0:
+        headers['Cache-Control'] = 'max-age={}'.format(cache_age)
+    elif not cache_age and ext != 'html':
+        headers['Cache-Control'] = 'max-age={}'.format(3600)
+    return lines, 200, headers
 
 
-def render(file, data):
-    lines, status, headers = serve(file)
+def render(file, data, cache_age=0):
+    lines, status, headers = serve(file, cache_age)
     if status == 200:
         for key, value in data.items():
             lines = lines.replace('~~{}~~'.format(key).encode(), value.encode())
@@ -368,8 +394,8 @@ def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='
     global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE
     server = WSGIServer((bind, port), handler)
     server.set_app(application)
-    CORES_ORIGIN_ALLOW = {c for c in cors_allow_origin.lower().strip().split(',') if c}
-    CORS_METHODS_ALLOW = {c for c in cors_methods.lower().strip().split(',') if c}
+    CORES_ORIGIN_ALLOW = {c.lower() for c in cors_allow_origin} if isinstance(cors_allow_origin, (list, set, dict, tuple)) else {c for c in cors_allow_origin.lower().strip().split(',') if c}
+    CORS_METHODS_ALLOW = {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
     FAVICON = favicon
     COOKIE_AGE = cookie_max_age
     print('Server Started on', '{}:{}'.format(bind, port))

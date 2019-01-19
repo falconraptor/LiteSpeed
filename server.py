@@ -18,7 +18,6 @@ __ROUTE_CACHE = {}
 COOKIE_AGE = 3600
 CORES_ORIGIN_ALLOW = set()
 CORS_METHODS_ALLOW = set()
-FAVICON = ''
 STATUS = {s.value: '{} {}'.format(s.value, s.phrase) for s in HTTPStatus}
 URLS = {}
 EXT_MAP = {
@@ -187,7 +186,7 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
             env[env['REQUEST_METHOD']] = json.loads(env['BODY'])
         elif content_type == 'application/x-www-form-urlencoded':
             for q in env['BODY'].decode().split('&'):
-                q = q.split('=') if '=' in q else (q, None)
+                q = q.split('=', 1) if '=' in q else (q, None)
                 k, v = [unquote_plus(a) if a else a for a in q]
                 request_method = env[env['REQUEST_METHOD']]
                 if k in request_method:
@@ -241,8 +240,8 @@ def route(url=None, route_name=None, methods='*', cors=None, cors_methods=None, 
             func.url = url
             func.re = re.compile(url)
             func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.split(','))
-            func.cors = {c for c in cors.lower().strip().split(',') if c} if cors else None
-            func.cors_methods = {c for c in cors_methods.lower().strip().split(',') if c} if cors_methods else None
+            func.cors = None if not cors else {c.lower() for c in cors} if isinstance(cors, (list, set, dict, tuple)) else {c for c in cors.lower().strip().split(',') if c}
+            func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
             URLS[route_name] = func
 
         def wrapped(*args, **kwargs):
@@ -288,21 +287,28 @@ def app(env, start_response):
     body = ''
     headers = {}
     status = '200 OK'
-    cors = f[0].cors or CORES_ORIGIN_ALLOW
-    if cors:
-        if '*' in cors:
-            headers['Access-Control-Allow-Origin'] = '*'
-        elif env.get('ORIGIN', '').lower() in cors:
-            headers['Access-Control-Allow-Origin'] = env['ORIGIN']
-        else:
-            start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
-            return [b'']
-        methods = f[0].cors_methods or CORS_METHODS_ALLOW
-        if methods:
-            if '*' in methods:
-                headers['Access-Control-Allow-Method'] = '*'
-            elif env['REQUEST_METHOD'].lower() in methods:
-                headers['Access-Control-Allow-Method'] = env['REQUEST_METHOD']
+    methods = f[0].cors_methods or CORS_METHODS_ALLOW
+    if methods:
+        if '*' in methods:
+            headers['Access-Control-Allow-Method'] = '*'
+        elif env['REQUEST_METHOD'].lower() in methods:
+            headers['Access-Control-Allow-Method'] = env['REQUEST_METHOD']
+            cors = f[0].cors or CORES_ORIGIN_ALLOW
+            if cors:
+                if '*' in cors:
+                    headers['Access-Control-Allow-Origin'] = '*'
+                elif env.get('ORIGIN', '').lower() in cors:
+                    headers['Access-Control-Allow-Origin'] = env['ORIGIN']
+                else:
+                    start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
+                    return [b'']
+    else:
+        cors = f[0].cors or CORES_ORIGIN_ALLOW
+        if cors:
+            if '*' in cors:
+                headers['Access-Control-Allow-Origin'] = '*'
+            elif env.get('ORIGIN', '').lower() in cors:
+                headers['Access-Control-Allow-Origin'] = env['ORIGIN']
             else:
                 start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
                 return [b'']
@@ -390,13 +396,12 @@ def render(file, data, cache_age=0):
     return lines, status, headers
 
 
-def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='', cors_methods='', favicon=None, cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler, serve=True):
+def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='', cors_methods='', cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler, serve=True):
     global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE
     server = WSGIServer((bind, port), handler)
     server.set_app(application)
     CORES_ORIGIN_ALLOW = {c.lower() for c in cors_allow_origin} if isinstance(cors_allow_origin, (list, set, dict, tuple)) else {c for c in cors_allow_origin.lower().strip().split(',') if c}
     CORS_METHODS_ALLOW = {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
-    FAVICON = favicon
     COOKIE_AGE = cookie_max_age
     print('Server Started on', '{}:{}'.format(bind, port))
     if serve:
@@ -407,15 +412,14 @@ def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='
     return server
 
 
-def start_with_args(app=app, bind_default='0.0.0.0', port_default=8000, cors_allow_origin='', cors_methods='', favicon='', cookie_max_age=7 * 24 * 3600):
+def start_with_args(app=app, bind_default='0.0.0.0', port_default=8000, cors_allow_origin='', cors_methods='', cookie_max_age=7 * 24 * 3600, *, serve=True):
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default=bind_default)
     parser.add_argument('-p', '--port', default=port_default, type=int)
     parser.add_argument('--cors_allow_origin', default=cors_allow_origin)
     parser.add_argument('--cors_methods', default=cors_methods)
-    parser.add_argument('-f', '--favicon', default=favicon)
     parser.add_argument('--cookie_max_age', default=cookie_max_age)
-    start_server(app, **parser.parse_args().__dict__)
+    return start_server(app, **parser.parse_args().__dict__, serve=serve)
 
 
 if __name__ == '__main__':

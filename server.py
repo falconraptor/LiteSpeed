@@ -376,7 +376,7 @@ def serve(file, cache_age=0, headers=None):
     if not headers:
         headers = {'Content-Type': '{}; charset=utf-8'.format(EXT_MAP.get(ext, 'application/octet-stream'))}
     if not exists(file):
-        return '', 404
+        return '', 404, {}
     with open(file, 'rb') as _in:
         lines = _in.read()
     if 'Content-Type' not in headers:

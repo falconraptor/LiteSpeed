@@ -372,6 +372,7 @@ def app(env, start_response):
 
 
 def serve(file, cache_age=0, headers=None):
+    file = file.replace('../', '')
     ext = file.split('.')[-1]
     if not headers:
         headers = {'Content-Type': '{}; charset=utf-8'.format(EXT_MAP.get(ext, 'application/octet-stream'))}
@@ -388,11 +389,21 @@ def serve(file, cache_age=0, headers=None):
     return lines, 200, headers
 
 
-def render(file, data, cache_age=0):
+def render(file, data, cache_age=0, files=None):
     lines, status, headers = serve(file, cache_age)
     if status == 200:
-        for key, value in data.items():
-            lines = lines.replace('~~{}~~'.format(key).encode(), value.encode())
+        lines = lines.decode()
+        if isinstance(files, str):
+            files = [files]
+        find = re.compile(r'<~~(\w+)~~>(.*?)</~~\1~~>', re.DOTALL)
+        for file in files or []:
+            if exists(file):
+                with open(file, 'rt') as _in:
+                    data.update({k: v for k, v in find.findall(_in.read())})
+        for _ in range(2):
+            for key, value in data.items():
+                lines = lines.replace('~~{}~~'.format(key), value)
+        lines = re.sub('~~\w+~~', '', lines).encode()
     return lines, status, headers
 
 

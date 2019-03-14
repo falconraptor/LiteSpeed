@@ -1,4 +1,4 @@
-from server import route, serve, URLS, start_with_args, Request
+from .server import route, serve, URLS, start_with_args, Request
 
 
 @route()  # uses method name to generate url: /test/

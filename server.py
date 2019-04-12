@@ -1,10 +1,13 @@
 import json
 import re
 import socket
+import struct
 import sys
 from argparse import ArgumentParser
+from base64 import b64encode
 from collections import namedtuple
 from gzip import GzipFile
+from hashlib import sha1
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
@@ -16,9 +19,8 @@ from wsgiref.handlers import SimpleHandler
 
 __ROUTE_CACHE = {}
 COOKIE_AGE = 3600
-CORES_ORIGIN_ALLOW = set()
-CORS_METHODS_ALLOW = set()
-STATUS = {s.value: '{} {}'.format(s.value, s.phrase) for s in HTTPStatus}
+CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW = set(), set()
+STATUS = {s.value: f'{s.value} {s.phrase}' for s in HTTPStatus}
 URLS = {}
 EXT_MAP = {
     'pdf': 'application/pdf',
@@ -54,9 +56,9 @@ def json_serial(obj):
             return obj.__str__()
         if isinstance(obj, type(dict().items())):
             return dict(obj)
-        raise TypeError('Type not serializable ({})'.format(type(obj)))
+        raise TypeError(f'Type not serializable ({type(obj)})')
     except Exception as e:
-        raise TypeError('Type not serializable ({}) [{}]'.format(type(obj), e.__str__()))
+        raise TypeError(f'Type not serializable ({type(obj)}) [{e.__str__()}]')
 
 
 json_map = json_serial
@@ -77,11 +79,18 @@ class Request(dict):
         self.set_cookie(name, value, None, None, domain, path, secure, http_only)
 
 
-class WSGIServer(ThreadingTCPServer):
+class WebServer(ThreadingTCPServer):
     request_queue_size = 500
     allow_reuse_address = True
     application = None
     base_environ = Request()
+    daemon_threads = True
+    clients, handlers = {}, {}
+    id_counter = 0
+
+    def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
+        super().__init__(server_address, RequestHandlerClass, bind_and_activate)
+        self.functions = {'new': [], 'message': [], 'left': []}
 
     def server_bind(self):
         """Override server_bind to store the server name."""
@@ -93,11 +102,54 @@ class WSGIServer(ThreadingTCPServer):
         if not cls.base_environ:
             cls.base_environ = Request({'SERVER_NAME': socket.gethostname(), 'GATEWAY_INTERFACE': 'CGI/1.1', 'SERVER_PORT': str(port), 'REMOTE_HOST': '', 'CONTENT_LENGTH': '', 'SCRIPT_NAME': ''})
 
-    def get_app(self):
-        return self.application
+    def message_received(self, handler, msg):
+        self.handle(self.handlers[id(handler)], 'message', msg)
 
-    def set_app(self, application):
-        self.application = application
+    def new_client(self, handler):
+        self.id_counter += 1
+        client = {
+            'id': self.id_counter,
+            'handler': handler,
+            'address': handler.client_address
+        }
+        self.clients[client['id']] = client
+        self.handlers[id(client['handler'])] = client
+        self.handle(client, 'new')
+
+    def client_left(self, handler):
+        try:
+            client = self.handlers[id(handler)]
+            self.handle(client, 'left')
+            del self.clients[client['id']]
+            del self.handlers[id(client['handler'])]
+        except KeyError:
+            pass
+
+    def handle(self, client, type, msg=None):
+        for f in self.functions[type]:
+            f(client, self, *([msg] if msg else []))
+
+    @staticmethod
+    def send_message(client, msg):
+        client['handler'].send_message(msg)
+
+    @staticmethod
+    def send_json(client, obj):
+        client['handler'].send_json(obj)
+
+    def send_message_all(self, msg):
+        for client in self.clients.values():
+            client['handler'].send_message(msg)
+
+    def send_json_all(self, obj):
+        for client in self.clients.values():
+            client['handler'].send_json(obj)
+
+    def serve(self):
+        try:
+            self.serve_forever(.1)
+        except KeyboardInterrupt:
+            self.shutdown()
 
 
 class ServerHandler(SimpleHandler):
@@ -110,13 +162,29 @@ class ServerHandler(SimpleHandler):
             super().close()
 
 
-class WSGIRequestHandler(BaseHTTPRequestHandler):
+class RequestHandler(BaseHTTPRequestHandler):
+    """
+    websocket packet
+    +-+-+-+-+-------+-+-------------+-------------------------------+
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-------+-+-------------+-------------------------------+
+    |F|R|R|R| opcode|M| Payload len |    Extended payload length    |
+    |I|S|S|S|  (4)  |A|     (7)     |             (16/64)           |
+    |N|V|V|V|       |S|             |   (if payload len==126/127)   |
+    | |1|2|3|       |K|             |                               |
+    +-+-+-+-+-------+-+-------------+ - - - - - - - - - - - - - - - +
+    |     Extended payload length continued, if payload len == 127  |
+    + - - - - - - - - - - - - - - - +-------------------------------+
+    |                     Payload Data continued ...                |
+    +---------------------------------------------------------------+
+    """
     def __init__(self, request, client_address, server):
+        self.keep_alive = True
+        self.handshake_done = False
+        self.valid_client = False
         super().__init__(request, client_address, server)
-        self.raw_requestline = ''
-        self.requestline = ''
-        self.request_version = ''
-        self.command = ''
+        self.raw_requestline, self.requestline, self.request_version, self.command = '', '', '', ''
 
     def get_environ(self):
         env = Request({'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}, 'COOKIE': SimpleCookie()})
@@ -215,16 +283,95 @@ class WSGIRequestHandler(BaseHTTPRequestHandler):
     def handle(self):
         self.raw_requestline = self.rfile.readline(65537)
         if len(self.raw_requestline) > 65536:
-            self.requestline = ''
-            self.request_version = ''
-            self.command = ''
+            self.requestline, self.request_version, self.command = '', '', ''
             self.send_error(414)
             return
         if not self.parse_request():
             return
-        handler = ServerHandler(self.rfile, self.wfile, sys.stderr, self.get_environ())
+        env = self.get_environ()
+        if any(self.server.functions.values()):
+            self.handshake(env)
+            if self.valid_client:
+                while self.keep_alive:
+                    self.read_next_message()
+        handler = ServerHandler(self.rfile, self.wfile, sys.stderr, env)
         handler.request_handler = self
-        handler.run(self.server.get_app())
+        handler.run(self.server.application)
+
+    def read_next_message(self):
+        b1, b2 = 0, 0
+        try:
+            b1, b2 = self.rfile.read(2)
+        except ConnectionResetError as e:  # to be replaced with ConnectionResetError for py3
+            print(f'Error: {e}')
+            self.keep_alive = False
+            return
+        except ValueError:
+            pass
+        opcode = b1 & 0x0f
+        masked = b2 & 0x80
+        payload_length = b2 & 0x7f
+        if opcode == 0x8 or not masked:
+            self.keep_alive = False
+            return
+        if opcode == 0x2:  # binary
+            return
+        elif opcode == 0x1:  # text
+            opcode_handler = self.server.message_received
+        else:
+            self.keep_alive = False
+            return
+        if payload_length == 126:
+            payload_length = struct.unpack(">H", self.rfile.read(2))[0]
+        elif payload_length == 127:
+            payload_length = struct.unpack(">Q", self.rfile.read(8))[0]
+        masks = self.rfile.read(4)
+        message_bytes = bytearray()
+        for message_byte in self.rfile.read(payload_length):
+            message_bytes.append(message_byte ^ masks[len(message_bytes) % 4])
+        opcode_handler(self, message_bytes.decode('utf8'))
+
+    def handshake(self, env):
+        if env['REQUEST_METHOD'] != 'GET' or self.headers.get('upgrade', '').lower() != 'websocket' or 'sec-websocket-key' not in self.headers:
+            return
+        self.handshake_done = self.request.send(f'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {b64encode(sha1((self.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).strip().decode("ASCII")}\r\n\r\n'.encode())
+        self.valid_client = True
+        self.server.new_client(self)
+
+    def send_message(self, message, opcode=0x1):
+        """Important: Fragmented(=continuation) messages are not supported since their usage cases are limited - when we don't know the payload length."""
+        if isinstance(message, bytes):
+            try:
+                message = message.decode('utf-8')  # this is slower but ensures we have UTF-8
+            except UnicodeDecodeError:
+                return False
+        elif not isinstance(message, str):
+            return False
+        header = bytearray()
+        payload = message.encode()
+        payload_length = len(payload)
+        header.append(0x80 | opcode)
+        if payload_length <= 125:  # Normal payload
+            header.append(payload_length)
+        elif 126 <= payload_length <= 65535:  # Extended payload
+            header.append(0x7e)
+            header.extend(struct.pack(">H", payload_length))
+        elif payload_length < 18446744073709551616:  # Huge extended payload
+            header.append(0x7f)
+            header.extend(struct.pack(">Q", payload_length))
+        else:
+            raise Exception("Message is too big. Consider breaking it into chunks.")
+        try:
+            self.request.send(header + payload)
+        except Exception as e:
+            print(self.client_address, e)
+
+    def send_json(self, message):
+        self.send_message(json.dumps(message, default=json_serial))
+
+    def finish(self):
+        super().finish()
+        self.server.client_left(self)
 
 
 def route(url=None, route_name=None, methods='*', cors=None, cors_methods=None, no_end_slash=False, f=None):
@@ -375,21 +522,23 @@ def serve(file, cache_age=0, headers=None):
     file = file.replace('../', '')
     ext = file.split('.')[-1]
     if not headers:
-        headers = {'Content-Type': '{}; charset=utf-8'.format(EXT_MAP.get(ext, 'application/octet-stream'))}
+        headers = {'Content-Type': f'{EXT_MAP.get(ext, "application/octet-stream")}; charset=utf-8'}
     if not exists(file):
         return '', 404, {}
     with open(file, 'rb') as _in:
         lines = _in.read()
     if 'Content-Type' not in headers:
-        headers['Content-Type'] = '{}; charset=utf-8'.format(EXT_MAP.get(ext, 'application/octet-stream'))
+        headers['Content-Type'] = f'{EXT_MAP.get(ext, "application/octet-stream")}; charset=utf-8'
     if cache_age > 0:
-        headers['Cache-Control'] = 'max-age={}'.format(cache_age)
+        headers['Cache-Control'] = f'max-age={cache_age}'
     elif not cache_age and ext != 'html':
-        headers['Cache-Control'] = 'max-age={}'.format(3600)
+        headers['Cache-Control'] = 'max-age=3600'
     return lines, 200, headers
 
 
-def render(file, data, cache_age=0, files=None):
+def render(file, data=None, cache_age=0, files=None):
+    if not data:
+        data = {}
     lines, status, headers = serve(file, cache_age)
     if status == 200:
         lines = lines.decode()
@@ -402,24 +551,21 @@ def render(file, data, cache_age=0, files=None):
                     data.update({k: v for k, v in find.findall(_in.read())})
         for _ in range(2):
             for key, value in data.items():
-                lines = lines.replace('~~{}~~'.format(key), value)
-        lines = re.sub('~~\w+~~', '', lines).encode()
+                lines = lines.replace(f'~~{key}~~', value)
+        lines = re.sub(r'~~\w+~~', '', lines).encode()
     return lines, status, headers
 
 
-def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='', cors_methods='', cookie_max_age=7 * 24 * 3600, *, handler=WSGIRequestHandler, serve=True):
+def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='', cors_methods='', cookie_max_age=7 * 24 * 3600, *, handler=RequestHandler, serve=True):
     global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE
-    server = WSGIServer((bind, port), handler)
-    server.set_app(application)
+    server = WebServer((bind, port), handler)
+    server.application = application
     CORES_ORIGIN_ALLOW = {c.lower() for c in cors_allow_origin} if isinstance(cors_allow_origin, (list, set, dict, tuple)) else {c for c in cors_allow_origin.lower().strip().split(',') if c}
     CORS_METHODS_ALLOW = {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
     COOKIE_AGE = cookie_max_age
-    print('Server Started on', '{}:{}'.format(bind, port))
+    print('Server Started on', f'{bind}:{port}')
     if serve:
-        try:
-            server.serve_forever(.1)
-        except KeyboardInterrupt:
-            server.shutdown()
+        server.serve()
     return server
 
 

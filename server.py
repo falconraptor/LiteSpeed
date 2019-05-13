@@ -19,6 +19,7 @@ from os.path import exists, getmtime
 from socketserver import ThreadingTCPServer
 from threading import Thread
 from time import sleep
+from typing import Optional, Tuple, List, Dict, Union, Any
 from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
 
@@ -78,11 +79,14 @@ class Request(dict):
         except AttributeError:
             return self[name]
 
-    def set_cookie(self, name, value, expires=None, max_age=COOKIE_AGE, domain=None, path=None, secure=None, http_only=None):
+    def __setattr__(self, key, value):
+        self[key] = value
+
+    def set_cookie(self, name, value, expires=None, max_age: Optional[int] = COOKIE_AGE, domain: Optional[str] = None, path: Optional[str] = None, secure: Optional[bool] = None, http_only: Optional[bool] = None):
         self['COOKIE'][name] = value
         self['COOKIE'][name].update({name: e for name, e in {'expires': expires, 'max-age': max_age, 'domain': domain, 'path': path, 'secure': secure, 'httponly': http_only}.items() if e is not None})
 
-    def set_session(self, name, value, domain=None, path=None, secure=None, http_only=None):
+    def set_session(self, name, value, domain: Optional[str] = None, path: Optional[str] = None, secure: Optional[bool] = None, http_only: Optional[bool] = None):
         self.set_cookie(name, value, None, None, domain, path, secure, http_only)
 
 
@@ -105,7 +109,7 @@ class WebServer(ThreadingTCPServer):
         self.setup_env(self.server_address[1])
 
     @classmethod
-    def setup_env(cls, port):
+    def setup_env(cls, port: int):
         if not cls.base_environ:
             cls.base_environ = Request({'SERVER_NAME': socket.gethostname(), 'GATEWAY_INTERFACE': 'CGI/1.1', 'SERVER_PORT': str(port), 'REMOTE_HOST': '', 'CONTENT_LENGTH': '', 'SCRIPT_NAME': ''})
 
@@ -132,7 +136,7 @@ class WebServer(ThreadingTCPServer):
         except KeyError:
             pass
 
-    def handle(self, client, type, msg=None):
+    def handle(self, client, type: str, msg=None):
         for f in self.functions[type]:
             f(client, self, *([msg] if msg else []))
 
@@ -186,6 +190,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     |                     Payload Data continued ...                |
     +---------------------------------------------------------------+
     """
+
     def __init__(self, request, client_address, server):
         self.keep_alive = True
         self.handshake_done = False
@@ -309,7 +314,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         b1, b2 = 0, 0
         try:
             b1, b2 = self.rfile.read(2)
-        except ConnectionResetError as e:  # to be replaced with ConnectionResetError for py3
+        except ConnectionResetError as e:
             print(f'Error: {e}')
             self.keep_alive = False
             return
@@ -345,7 +350,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.valid_client = True
         self.server.new_client(self)
 
-    def send_message(self, message, opcode=0x1):
+    def send_message(self, message, opcode: int = 0x1):
         """Important: Fragmented(=continuation) messages are not supported since their usage cases are limited - when we don't know the payload length."""
         if isinstance(message, bytes):
             try:
@@ -381,8 +386,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.server.client_left(self)
 
 
-def route(url=None, route_name=None, methods='*', cors=None, cors_methods=None, no_end_slash=False, autoreload=None, f=None):
-    def decorated(func):
+def route(url: Optional[str] = None, route_name: Optional[str] = None, methods='*', cors=None, cors_methods=None, no_end_slash: bool = False, autoreload: Optional[bool] = None, f=None):
+    def decorated(func) -> partial:
         nonlocal url, route_name
         if url is None:
             url = (func.__module__ + '/').replace('__main__/', '') + (func.__name__ + '/').replace('index/', '')
@@ -409,7 +414,7 @@ def route(url=None, route_name=None, methods='*', cors=None, cors_methods=None, 
     return decorated
 
 
-def compress_string(s):
+def compress_string(s) -> bytes:
     zbuf = BytesIO()
     with GzipFile(mode='wb', compresslevel=6, fileobj=zbuf, mtime=0) as zfile:
         zfile.write(s)
@@ -423,7 +428,7 @@ def app(env, start_response):
         start_response('307 Moved Permanently', [('Location', path + '/')])
         return [b'']
     if path not in __ROUTE_CACHE:
-        for name, url in URLS.items():
+        for _, url in URLS.items():
             m = url.re.fullmatch(path[1:]) or url.re.fullmatch(path)
             if m:
                 groups = m.groups()
@@ -483,6 +488,7 @@ def app(env, start_response):
                 headers.update(dict(request_headers))
             elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
                 headers.update({r[0]: r[1] for r in result})
+
         if isinstance(result, (tuple, type(namedtuple), list)):
             l_result = len(result)
             body = result[0] if l_result <= 3 else result
@@ -527,13 +533,13 @@ def app(env, start_response):
     return body
 
 
-def serve(file, cache_age=0, headers=None):
+def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = None) -> Tuple[bytes, int, Dict[str, str]]:
     file = file.replace('../', '')
     ext = file.split('.')[-1]
     if not headers:
         headers = {'Content-Type': f'{EXT_MAP.get(ext, "application/octet-stream")}; charset=utf-8'}
     if not exists(file):
-        return '', 404, {}
+        return b'', 404, {}
     with open(file, 'rb') as _in:
         lines = _in.read()
     if 'Content-Type' not in headers:
@@ -545,7 +551,7 @@ def serve(file, cache_age=0, headers=None):
     return lines, 200, headers
 
 
-def render(file, data=None, cache_age=0, files=None):
+def render(file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Optional[Union[List[str], str]] = None) -> Tuple[bytes, int, Dict[str, str]]:
     if data is None:
         data = {}
     if files is None:
@@ -624,7 +630,7 @@ def reloading():
         sleep(1)
 
 
-def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='', cors_methods='', cookie_max_age=7 * 24 * 3600, handler=RequestHandler, serve=True, autoreload=False, *, reload_extra_files=None):
+def start_server(application=app, bind: str = '0.0.0.0', port: int = 8000, cors_allow_origin='', cors_methods='', cookie_max_age: int = 7 * 24 * 3600, handler=RequestHandler, serve: bool = True, autoreload: bool = False, *, reload_extra_files: Optional[List[str]] = None) -> WebServer:
     global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE, AUTORELOAD, RELOAD_EXTRA_FILES
     server = WebServer((bind, port), handler)
     server.application = application
@@ -641,7 +647,7 @@ def start_server(application=app, bind='0.0.0.0', port=8000, cors_allow_origin='
     return server
 
 
-def start_with_args(app=app, bind_default='0.0.0.0', port_default=8000, cors_allow_origin='', cors_methods='', cookie_max_age=7 * 24 * 3600, serve=True, autoreload=False, *, reload_extra_files=None):
+def start_with_args(app=app, bind_default: str = '0.0.0.0', port_default: int = 8000, cors_allow_origin='', cors_methods='', cookie_max_age: int = 7 * 24 * 3600, serve: bool = True, autoreload: bool = False, *, reload_extra_files: Optional[List[str]] = None) -> WebServer:
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default=bind_default)
     parser.add_argument('-p', '--port', default=port_default, type=int)
@@ -656,4 +662,6 @@ if __name__ == '__main__':
     @route()
     def index(request):
         return [b'Not Implemented']
+
+
     start_with_args()

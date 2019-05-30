@@ -45,7 +45,8 @@ EXT_MAP = {
     'rar': 'application/x-rar-compressed',
     'tar': 'application/x-tar',
     'txt': 'text/plain',
-    'ttf': 'application/x-font-ttf'
+    'ttf': 'application/x-font-ttf',
+    'ico': 'image/x-icon'
 }
 
 
@@ -519,7 +520,7 @@ def app(env, start_response):
         headers['Content-Type'] = 'text/html; charset=utf-8'
     body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else body
     l = len(body[0])
-    if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and l > 200:
+    if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and l > 200 and 'image' not in headers.get('Content-Type', '').lower():
         compressed_body = compress_string(body[0])
         cl = len(compressed_body)
         if cl < l:
@@ -536,14 +537,14 @@ def app(env, start_response):
 def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = None) -> Tuple[bytes, int, Dict[str, str]]:
     file = file.replace('../', '')
     ext = file.split('.')[-1]
-    if not headers:
-        headers = {'Content-Type': f'{EXT_MAP.get(ext, "application/octet-stream")}; charset=utf-8'}
+    if headers is None:
+        headers = {}
     if not exists(file):
         return b'', 404, {}
     with open(file, 'rb') as _in:
         lines = _in.read()
     if 'Content-Type' not in headers:
-        headers['Content-Type'] = f'{EXT_MAP.get(ext, "application/octet-stream")}; charset=utf-8'
+        headers['Content-Type'] = f'{EXT_MAP.get(ext, "application/octet-stream")}'
     if cache_age > 0:
         headers['Cache-Control'] = f'max-age={cache_age}'
     elif not cache_age and ext != 'html':
@@ -551,7 +552,7 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
     return lines, 200, headers
 
 
-def render(file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Optional[Union[List[str], str]] = None) -> Tuple[bytes, int, Dict[str, str]]:
+def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Optional[Union[List[str], str]] = None) -> Tuple[bytes, int, Dict[str, str]]:
     if data is None:
         data = {}
     if files is None:
@@ -563,7 +564,7 @@ def render(file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Op
             files = [files]
         extends = re.search(r'~~extends ([\w\s./\\-]+)~~', lines.split('\n', 1)[0])
         if extends:
-            return render(extends[1], data, cache_age, [file] + files)
+            return render(request, extends[1], data, cache_age, [file] + files)
         find = re.compile(r'<~~(\w+)~~>(.*?)</~~\1~~>', re.DOTALL)
         for file in files or []:
             if exists(file):
@@ -572,12 +573,19 @@ def render(file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Op
         for _ in range(2):
             for key, value in data.items():
                 lines = lines.replace(f'~~{key}~~', value)
-            includes = re.findall(r'~~includes ([\w\s./\\-]+)~~', lines)
-            for file in includes:
+            for file in re.findall(r'~~includes ([\w\s./\\-]+)~~', lines):
                 if exists(file):
                     with open(file) as _in:
                         lines = lines.replace(f'~~includes {file}~~', _in.read())
-        lines = re.sub(r'<?/?~~\w+~~>?', '', lines).encode()
+            for match in re.findall(r'(<?~~([\w.\'"()\[\]\s{}?=/\\<>:,-_#]+)~~>?)', lines):
+                if match[1][0] == '<':
+                    continue
+                try:
+                    lines = lines.replace(match[0], str(eval(match[1])))
+                except Exception as e:
+                    print(file, files, match, e.__repr__(), locals().keys())
+                    pass
+        lines = re.sub(r'<?/?~~[\w.\'"()\[\]\s{}?=/\\<>:,-_#]+~~>?', '', lines).encode()
     return lines, status, headers
 
 
@@ -622,10 +630,11 @@ def reloading():
             updated = getmtime(file)
             if updated > last:
                 try:
-                    reload(import_module(file))
+                    reload(import_module(file.replace('.py', '')))
                     print(f'[{datetime.now()}] Reloaded {file}')
                 except Exception as e:
                     print(f'[{datetime.now()}] Error while reloading {file}: {e}')
+                    updated = getmtime(file)
                 RELOAD_EXTRA_FILES[file] = updated
         sleep(1)
 

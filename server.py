@@ -402,10 +402,10 @@ def route(url: Optional[str] = None, route_name: Optional[str] = None, methods='
             func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.split(','))
             func.cors = None if not cors else {c.lower() for c in cors} if isinstance(cors, (list, set, dict, tuple)) else {c for c in cors.lower().strip().split(',') if c}
             func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
-            if func.__module__ != '__main__':
-                func.last = getmtime(f'{func.__module__}.py')
+            # if func.__module__ != '__main__':
+            #     func.last = getmtime(f'{func.__module__}.py')
             func.route_name = route_name
-            func.autoreload = autoreload
+            # func.autoreload = autoreload
             func.cache = []
             URLS[route_name] = func
         return partial(func)
@@ -589,54 +589,54 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
     return lines, status, headers
 
 
-def reloading():
-    while True:
-        files_to_update = {}
-        for func in (f for f in URLS.values() if f.autoreload or (f.autoreload is None and AUTORELOAD)):
-            mod = func.__module__
-            if mod:
-                try:
-                    updated = getmtime(f'{mod.replace(".", "/")}.py')
-                except FileNotFoundError:
-                    continue
-                if updated > func.last:
-                    try:
-                        files_to_update[mod].append(func)
-                    except KeyError:
-                        files_to_update[mod] = [func]
-        for file, functions in files_to_update.items():
-            tmps = []
-            for f in functions:
-                tmps.append(URLS[f.route_name])
-                del URLS[f.route_name]
-                for c in f.cache:
-                    try:
-                        del __ROUTE_CACHE[c]
-                    except KeyError:
-                        pass
-            try:
-                reload(import_module(file))
-                print(f'[{datetime.now()}] Reloaded {file}')
-            except Exception as e:
-                print(f'[{datetime.now()}] Error while reloading {file}: {e}')
-                updated = getmtime(f'{file.replace(".", "/")}.py')
-                for f in tmps:
-                    URLS[f.route_name] = f
-                    f.last = updated
-        for file, last in RELOAD_EXTRA_FILES.items():
-            if not last:
-                RELOAD_EXTRA_FILES[file] = getmtime(file)
-                continue
-            updated = getmtime(file)
-            if updated > last:
-                try:
-                    reload(import_module(file.replace('.py', '')))
-                    print(f'[{datetime.now()}] Reloaded {file}')
-                except Exception as e:
-                    print(f'[{datetime.now()}] Error while reloading {file}: {e}')
-                    updated = getmtime(file)
-                RELOAD_EXTRA_FILES[file] = updated
-        sleep(1)
+# def reloading():
+#     while True:
+#         files_to_update = {}
+#         for func in (f for f in URLS.values() if f.autoreload or (f.autoreload is None and AUTORELOAD)):
+#             mod = func.__module__
+#             if mod:
+#                 try:
+#                     updated = getmtime(f'{mod.replace(".", "/")}.py')
+#                 except FileNotFoundError:
+#                     continue
+#                 if updated > func.last:
+#                     try:
+#                         files_to_update[mod].append(func)
+#                     except KeyError:
+#                         files_to_update[mod] = [func]
+#         for file, functions in files_to_update.items():
+#             tmps = []
+#             for f in functions:
+#                 tmps.append(URLS[f.route_name])
+#                 del URLS[f.route_name]
+#                 for c in f.cache:
+#                     try:
+#                         del __ROUTE_CACHE[c]
+#                     except KeyError:
+#                         pass
+#             try:
+#                 reload(import_module(file))
+#                 print(f'[{datetime.now()}] Reloaded {file}')
+#             except Exception as e:
+#                 print(f'[{datetime.now()}] Error while reloading {file}: {e}')
+#                 updated = getmtime(f'{file.replace(".", "/")}.py')
+#                 for f in tmps:
+#                     URLS[f.route_name] = f
+#                     f.last = updated
+#         for file, last in RELOAD_EXTRA_FILES.items():
+#             if not last:
+#                 RELOAD_EXTRA_FILES[file] = getmtime(file)
+#                 continue
+#             updated = getmtime(file)
+#             if updated > last:
+#                 try:
+#                     reload(import_module(file.replace('.py', '')))
+#                     print(f'[{datetime.now()}] Reloaded {file}')
+#                 except Exception as e:
+#                     print(f'[{datetime.now()}] Error while reloading {file}: {e}')
+#                     updated = getmtime(file)
+#                 RELOAD_EXTRA_FILES[file] = updated
+#         sleep(1)
 
 
 def start_server(application=app, bind: str = '0.0.0.0', port: int = 8000, cors_allow_origin='', cors_methods='', cookie_max_age: int = 7 * 24 * 3600, handler=RequestHandler, serve: bool = True, autoreload: bool = False, *, reload_extra_files: Optional[List[str]] = None) -> WebServer:
@@ -646,12 +646,12 @@ def start_server(application=app, bind: str = '0.0.0.0', port: int = 8000, cors_
     CORES_ORIGIN_ALLOW = {c.lower() for c in cors_allow_origin} if isinstance(cors_allow_origin, (list, set, dict, tuple)) else {c for c in cors_allow_origin.lower().strip().split(',') if c}
     CORS_METHODS_ALLOW = {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
     COOKIE_AGE = cookie_max_age
-    AUTORELOAD = autoreload
+    # AUTORELOAD = autoreload
     RELOAD_EXTRA_FILES = {f: None for f in reload_extra_files or []}
     print('Server Started on', f'{bind}:{port}')
     if serve:
-        if autoreload or any(f.autoreload for f in URLS.values()) or reload_extra_files:
-            Thread(target=reloading).start()
+        # if autoreload or any(f.autoreload for f in URLS.values()) or reload_extra_files:
+        #     Thread(target=reloading).start()
         server.serve()
     return server
 
@@ -663,7 +663,7 @@ def start_with_args(app=app, bind_default: str = '0.0.0.0', port_default: int = 
     parser.add_argument('--cors_allow_origin', default=cors_allow_origin)
     parser.add_argument('--cors_methods', default=cors_methods)
     parser.add_argument('--cookie_max_age', default=cookie_max_age)
-    parser.add_argument('--autoreload', action='store_true', default=autoreload)
+    # parser.add_argument('--autoreload', action='store_true', default=autoreload)
     return start_server(app, **parser.parse_args().__dict__, serve=serve, reload_extra_files=reload_extra_files)
 
 

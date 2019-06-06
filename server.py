@@ -581,7 +581,7 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
                 if match[1][0] == '<':
                     continue
                 try:
-                    lines = lines.replace(match[0], str(eval(match[1])))
+                    lines = lines.replace(match[0], str(eval(match[1], {'request': request, 'data': data})))
                 except Exception as e:
                     print(file, files, match, e.__repr__(), locals().keys())
                     pass

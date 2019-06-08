@@ -572,18 +572,19 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
                     data.update({k: v for k, v in find.findall(_in.read())})
         for _ in range(2):
             for key, value in data.items():
-                lines = lines.replace(f'~~{key}~~', value)
+                if isinstance(value, str):
+                    lines = lines.replace(f'~~{key}~~', value)
             for file in re.findall(r'~~includes ([\w\s./\\-]+)~~', lines):
                 if exists(file):
                     with open(file) as _in:
                         lines = lines.replace(f'~~includes {file}~~', _in.read())
-            for match in re.findall(r'(<?~~([\w.\'"()\[\]\s{}?=/\\<>:,-_#]+)~~>?)', lines):
+            for match in re.findall(r'(<?~~([^~]+)~~>?)', lines):
                 if match[1][0] == '<':
                     continue
                 try:
                     lines = lines.replace(match[0], str(eval(match[1], {'request': request, 'data': data})))
                 except Exception as e:
-                    print(file, files, match, e.__repr__(), locals().keys())
+                    # print(files, match, e.__repr__(), locals().keys())
                     pass
         lines = re.sub(r'<?/?~~[\w.\'"()\[\]\s{}?=/\\<>:,-_#]+~~>?', '', lines).encode()
     return lines, status, headers

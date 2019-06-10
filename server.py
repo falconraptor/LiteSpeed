@@ -1,26 +1,30 @@
 import json
+import mimetypes
 import re
 import socket
 import struct
 import sys
+from _pydecimal import Decimal
 from argparse import ArgumentParser
 from base64 import b64encode
 from collections import namedtuple
-from datetime import datetime
+from datetime import datetime, date, time
+from email.message import EmailMessage
+from email.utils import make_msgid
 from functools import partial
 from gzip import GzipFile
 from hashlib import sha1
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
-from importlib import reload, import_module
 from io import BytesIO
-from os.path import exists, getmtime
+from os.path import exists
+from pprint import pformat
+from smtplib import SMTP
 from socketserver import ThreadingTCPServer
-from threading import Thread
-from time import sleep
-from typing import Optional, Tuple, List, Dict, Union, Any
+from typing import Optional, Tuple, List, Dict, Union, Any, Iterable
 from urllib.parse import unquote, unquote_plus
+from urllib.request import urlopen
 from wsgiref.handlers import SimpleHandler
 
 __ROUTE_CACHE = {}
@@ -28,25 +32,14 @@ COOKIE_AGE = 3600
 CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW = set(), set()
 STATUS = {s.value: f'{s.value} {s.phrase}' for s in HTTPStatus}
 URLS = {}
-AUTORELOAD = None
-RELOAD_EXTRA_FILES = None
-EXT_MAP = {
-    'pdf': 'application/pdf',
-    'css': 'text/css',
-    'html': 'text/html',
-    'json': 'application/json',
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'exe': 'application/x-msdownload',
-    'xls': 'application/vnd.ms-excel',
-    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'otf': 'application/x-font-otf',
-    'png': 'image/png',
-    'rar': 'application/x-rar-compressed',
-    'tar': 'application/x-tar',
-    'txt': 'text/plain',
-    'ttf': 'application/x-font-ttf',
-    'ico': 'image/x-icon'
+DEBUG = False
+ADMINS = []
+DEFAULT_EMAIL = {
+    'from': '',
+    'user': '',
+    'password': '',
+    'host': '',
+    'port': 25
 }
 
 
@@ -70,7 +63,168 @@ def json_serial(obj):
         raise TypeError(f'Type not serializable ({type(obj)}) [{e.__str__()}]')
 
 
-json_map = json_serial
+class ExceptionReporter:
+    """Organize and coordinate reporting on exceptions."""
+
+    def __init__(self, request, exc_type, exc_value, tb):
+        self.request = request
+        self.exc_type = exc_type
+        self.exc_value = exc_value
+        self.tb = tb
+        self.postmortem = None
+
+    def get_traceback_data(self):
+        """Return a dictionary containing traceback information."""
+        frames = self.get_traceback_frames()
+        for i, frame in enumerate(frames):
+            if 'vars' in frame:
+                frame_vars = []
+                for k, v in frame['vars']:
+                    try:
+                        if isinstance(v, (Iterable, dict)):
+                            v = json.dumps(v, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
+                    except Exception:
+                        pass
+                    if not isinstance(v, str):
+                        try:
+                            v = pformat(v).replace('<', '&lt;').replace('>', '&gt;')
+                        except Exception as e:
+                            v = f"Error in formatting: {e.__class__.__name__}: {e}".replace('<', '&lt;').replace('>', '&gt;')
+                    frame_vars.append((k, v))
+                frame['vars'] = frame_vars
+            frames[i] = frame
+        unicode_hint = ''
+        if self.exc_type and issubclass(self.exc_type, UnicodeError):
+            start = getattr(self.exc_value, 'start', None)
+            end = getattr(self.exc_value, 'end', None)
+            if start is not None and end is not None:
+                unicode_str = self.exc_value.args[1]
+                unicode_hint = self.force_text(unicode_str[max(start - 5, 0):min(end + 5, len(unicode_str))], 'ascii', errors='replace')
+        c = {
+            'unicode_hint': unicode_hint,
+            'frames': frames,
+            'sys_executable': sys.executable,
+            'sys_version_info': '%d.%d.%d' % sys.version_info[0:3],
+            'sys_path': sys.path,
+            'postmortem': self.postmortem,
+        }
+        # Check whether exception info is available
+        if self.exc_type:
+            c['exception_type'] = self.exc_type.__name__
+        if self.exc_value:
+            c['exception_value'] = str(self.exc_value)
+        if frames:
+            c['lastframe'] = frames[-1]
+        return c
+
+    def get_traceback_html(self):
+        """Return HTML version of debug 500 HTTP error page."""
+        return render(self.request, 'webserver/html/500.html', self.get_traceback_data())
+
+    @staticmethod
+    def force_text(s, encoding='utf-8', strings_only=False, errors='strict'):
+        """Similar to smart_text, except that lazy instances are resolved to strings, rather than kept as lazy objects.
+
+        If strings_only is True, don't convert (some) non-string-like objects."""
+        if issubclass(type(s), str) or (strings_only and isinstance(s, (type(None), int, float, Decimal, datetime, date, time))):
+            return s
+        try:
+            if isinstance(s, bytes):
+                s = str(s, encoding, errors)
+            else:
+                s = str(s)
+        except UnicodeDecodeError as e:
+            raise Exception(f'{e}. You passed in {s!r} ({type(s)})')
+        return s
+
+    @staticmethod
+    def _get_lines_from_file(filename, lineno, context_lines, loader=None, module_name=None):
+        """
+        Return context_lines before and after lineno from file.
+        Return (pre_context_lineno, pre_context, context_line, post_context).
+        """
+        source = None
+        if hasattr(loader, 'get_source'):
+            try:
+                source = loader.get_source(module_name)
+            except ImportError:
+                pass
+            if source is not None:
+                source = source.splitlines()
+        if source is None:
+            try:
+                with open(filename, 'rb') as fp:
+                    source = fp.read().splitlines()
+            except (OSError, IOError):
+                pass
+        if source is None:
+            return None, [], None, []
+        # If we just read the source from a file, or if the loader did not apply tokenize.detect_encoding to decode the source into a string, then we should do that ourselves.
+        if isinstance(source[0], bytes):
+            encoding = 'ascii'
+            for line in source[:2]:
+                # File coding may be specified. Match pattern from PEP-263  (https://www.python.org/dev/peps/pep-0263/)
+                match = re.search(br'coding[:=]\s*([-\w.]+)', line)
+                if match:
+                    encoding = match.group(1).decode('ascii')
+                    break
+            source = [str(sline, encoding, 'replace') for sline in source]
+        lower_bound = max(0, lineno - context_lines)
+        return lower_bound, source[lower_bound:lineno], source[lineno], source[lineno + 1:lineno + context_lines]
+
+    def get_traceback_frames(self):
+        def explicit_or_implicit_cause(exc_value):
+            return getattr(exc_value, '__cause__', None) or getattr(exc_value, '__context__', None)
+
+        # Get the exception and all its causes
+        exceptions = []
+        exc_value = self.exc_value
+        while exc_value:
+            exceptions.append(exc_value)
+            exc_value = explicit_or_implicit_cause(exc_value)
+        # No exceptions were supplied to ExceptionReporter
+        if not exceptions:
+            return []
+        # In case there's just one exception, take the traceback from self.tb
+        frames = []
+        exc_value = exceptions.pop()
+        tb = self.tb if not exceptions else exc_value.__traceback__
+        while tb is not None:
+            # Support for __traceback_hide__ which is used by a few libraries to hide internal frames.
+            if tb.tb_frame.f_locals.get('__traceback_hide__'):
+                tb = tb.tb_next
+                continue
+            filename = tb.tb_frame.f_code.co_filename
+            function = tb.tb_frame.f_code.co_name
+            lineno = tb.tb_lineno - 1
+            module_name = tb.tb_frame.f_globals.get('__name__') or ''
+            pre_context_lineno, pre_context, context_line, post_context = self._get_lines_from_file(filename, lineno, 7, tb.tb_frame.f_globals.get('__loader__'), module_name)
+            if pre_context_lineno is None:
+                pre_context_lineno = lineno
+                pre_context = []
+                context_line = '<source code not available>'
+                post_context = []
+            frames.append({
+                'exc_cause': explicit_or_implicit_cause(exc_value),
+                'exc_cause_explicit': getattr(exc_value, '__cause__', True),
+                'tb': tb,
+                'filename': filename,
+                'function': function,
+                'lineno': lineno + 1,
+                'vars': tb.tb_frame.f_locals.items(),
+                'id': id(tb),
+                'pre_context': pre_context,
+                'context_line': context_line,
+                'post_context': post_context,
+                'pre_context_lineno': pre_context_lineno + 1,
+            })
+            # If the traceback for current exception is consumed, try the other exception.
+            if not tb.tb_next and exceptions:
+                exc_value = exceptions.pop()
+                tb = exc_value.__traceback__
+            else:
+                tb = tb.tb_next
+        return frames
 
 
 class Request(dict):
@@ -172,6 +326,16 @@ class ServerHandler(SimpleHandler):
             self.request_handler.log_request(self.status.split(' ', 1)[0], self.bytes_sent)
         finally:
             super().close()
+
+    def error_output(self, environ, start_response):
+        environ = Request(environ)
+        er = ExceptionReporter(environ, *sys.exc_info()).get_traceback_html()[0]
+        if ADMINS:
+            send_email(f'Internal Server Error: {environ.PATH_INFO}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=er.decode())
+        start_response(self.error_status, self.error_headers[:] if not DEBUG else [('Content-Type', 'text/html')], sys.exc_info())
+        if DEBUG:
+            return [er]
+        return [self.error_body]
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -387,7 +551,68 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.server.client_left(self)
 
 
-def route(url: Optional[str] = None, route_name: Optional[str] = None, methods='*', cors=None, cors_methods=None, no_end_slash: bool = False, autoreload: Optional[bool] = None, f=None):
+def send_email(subject: str, body: str, to: Union[str, Iterable], _from: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable]] = None, bcc: Optional[Union[str, Iterable]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None):
+    if not _from:
+        _from = DEFAULT_EMAIL['from']
+    if not host:
+        host = DEFAULT_EMAIL['host']
+    if port != DEFAULT_EMAIL['port']:
+        port = DEFAULT_EMAIL['port']
+    if not username:
+        username = DEFAULT_EMAIL['user']
+    if not password:
+        password = DEFAULT_EMAIL['password']
+    if not _from and username:
+        _from = username
+    elif not username and _from:
+        username = _from
+    if not _from or not host or not username or not password or not port or not any((to, cc, bcc)) or not any((subject, body, html, attachments)):
+        raise NotImplementedError('Must supply From or Username, Host, Password, Port, any of Subject, Body, HTML, Attachments, and any of TO, CC, BCC!')
+    m = EmailMessage()
+    m['Subject'] = subject
+    m['From'] = _from
+    if to:
+        m['To'] = ','.join(to) if isinstance(to, Iterable) else to
+    if cc:
+        m['CC'] = ','.join(cc) if isinstance(cc, Iterable) else cc
+    if bcc:
+        m['BCC'] = ','.join(bcc) if isinstance(bcc, Iterable) else bcc
+    m.set_content(body)
+    cids = []
+    if embed_files and html:
+        for file in (extra_embed or []) + re.findall(r'(?:href="|src=")([\w/._-]+\.\w+)"', html):
+            cid = make_msgid()
+            html.replace(file, f'cid:{cid[1:-1]}')
+            if file[:4] == 'http':
+                with urlopen(file) as fp, open(file.split('/')[-1], 'wb') as tmp:
+                    tmp.write(fp.read())
+                file = file.split('/')[-1]
+            ctype, encoding = mimetypes.guess_type(file)
+            if ctype is None or encoding is not None:
+                ctype = 'application/octet-stream'
+            maintype, subtype = ctype.split('/', 1)
+            with open(file, 'rb') as file:
+                cids.append((file.read(), maintype, subtype, cid))
+    if html:
+        m.add_alternative(html, subtype='html')
+        for cid in cids:
+            m.get_payload()[1].add_related(cid[0], cid[1], cid[2], cid=cid[3])
+    if attachments:
+        for f in (attachments if isinstance(attachments, Iterable) else [attachments]):
+            if exists(f):
+                ctype, encoding = mimetypes.guess_type(f)
+                if ctype is None or encoding is not None:
+                    ctype = 'application/octet-stream'
+                maintype, subtype = ctype.split('/', 1)
+                with open(f, 'rb') as fp:
+                    m.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=f)
+    with SMTP(host, port) as s:
+        s.starttls()
+        s.login(username, password)
+        s.send_message(m)
+
+
+def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, f=None):
     def decorated(func) -> partial:
         nonlocal url, route_name
         if url is None:
@@ -402,10 +627,7 @@ def route(url: Optional[str] = None, route_name: Optional[str] = None, methods='
             func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.split(','))
             func.cors = None if not cors else {c.lower() for c in cors} if isinstance(cors, (list, set, dict, tuple)) else {c for c in cors.lower().strip().split(',') if c}
             func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
-            # if func.__module__ != '__main__':
-            #     func.last = getmtime(f'{func.__module__}.py')
             func.route_name = route_name
-            # func.autoreload = autoreload
             func.cache = []
             URLS[route_name] = func
         return partial(func)
@@ -478,9 +700,11 @@ def app(env, start_response):
     try:
         result = f[0](env, *f[1], **f[2])
     except Exception as e:
-        raise e
-        # start_response('500 Internal Server Error', [('Content-Type', 'application/json; charset=utf-8')])
-        # return [json.dumps({'Errors': e.args}, default=json_map).encode()]
+        result = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
+        if ADMINS:
+            send_email(f'Internal Server Error: {env.PATH_INFO}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=result[0].decode())
+        if not DEBUG:
+            raise e
     if result:
         def process_headers(request_headers):
             if isinstance(request_headers, dict):
@@ -500,7 +724,7 @@ def app(env, start_response):
             if callable(body):
                 body = body()
             if isinstance(body, dict):
-                body = json.dumps(body, default=json_map).encode()
+                body = json.dumps(body, default=json_serial).encode()
                 headers['Content-Type'] = 'application/json; charset=utf-8'
         elif isinstance(result, dict):
             if 'body' in result:
@@ -512,7 +736,7 @@ def app(env, start_response):
             if 'headers' in result:
                 process_headers(result['headers'])
             if not (body or status != '200 OK'):
-                body = json.dumps(result, default=json_map).encode()
+                body = json.dumps(result, default=json_serial).encode()
                 headers['Content-Type'] = 'application/json; charset=utf-8'
         elif isinstance(result, (str, bytes)):
             body = result
@@ -544,7 +768,10 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
     with open(file, 'rb') as _in:
         lines = _in.read()
     if 'Content-Type' not in headers:
-        headers['Content-Type'] = f'{EXT_MAP.get(ext, "application/octet-stream")}'
+        ctype, encoding = mimetypes.guess_type(file)
+        if ctype is None or encoding is not None:
+            ctype = 'application/octet-stream'
+        headers['Content-Type'] = ctype
     if cache_age > 0:
         headers['Cache-Control'] = f'max-age={cache_age}'
     elif not cache_age and ext != 'html':
@@ -584,88 +811,51 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
                 try:
                     lines = lines.replace(match[0], str(eval(match[1], {'request': request, 'data': data})))
                 except Exception as e:
-                    # print(files, match, e.__repr__(), locals().keys())
-                    pass
+                    if DEBUG:
+                        print(files, match, e.__repr__(), locals().keys())
         lines = re.sub(r'<?/?~~[\w.\'"()\[\]\s{}?=/\\<>:,-_#]+~~>?', '', lines).encode()
     return lines, status, headers
 
 
-# def reloading():
-#     while True:
-#         files_to_update = {}
-#         for func in (f for f in URLS.values() if f.autoreload or (f.autoreload is None and AUTORELOAD)):
-#             mod = func.__module__
-#             if mod:
-#                 try:
-#                     updated = getmtime(f'{mod.replace(".", "/")}.py')
-#                 except FileNotFoundError:
-#                     continue
-#                 if updated > func.last:
-#                     try:
-#                         files_to_update[mod].append(func)
-#                     except KeyError:
-#                         files_to_update[mod] = [func]
-#         for file, functions in files_to_update.items():
-#             tmps = []
-#             for f in functions:
-#                 tmps.append(URLS[f.route_name])
-#                 del URLS[f.route_name]
-#                 for c in f.cache:
-#                     try:
-#                         del __ROUTE_CACHE[c]
-#                     except KeyError:
-#                         pass
-#             try:
-#                 reload(import_module(file))
-#                 print(f'[{datetime.now()}] Reloaded {file}')
-#             except Exception as e:
-#                 print(f'[{datetime.now()}] Error while reloading {file}: {e}')
-#                 updated = getmtime(f'{file.replace(".", "/")}.py')
-#                 for f in tmps:
-#                     URLS[f.route_name] = f
-#                     f.last = updated
-#         for file, last in RELOAD_EXTRA_FILES.items():
-#             if not last:
-#                 RELOAD_EXTRA_FILES[file] = getmtime(file)
-#                 continue
-#             updated = getmtime(file)
-#             if updated > last:
-#                 try:
-#                     reload(import_module(file.replace('.py', '')))
-#                     print(f'[{datetime.now()}] Reloaded {file}')
-#                 except Exception as e:
-#                     print(f'[{datetime.now()}] Error while reloading {file}: {e}')
-#                     updated = getmtime(file)
-#                 RELOAD_EXTRA_FILES[file] = updated
-#         sleep(1)
-
-
-def start_server(application=app, bind: str = '0.0.0.0', port: int = 8000, cors_allow_origin='', cors_methods='', cookie_max_age: int = 7 * 24 * 3600, handler=RequestHandler, serve: bool = True, autoreload: bool = False, *, reload_extra_files: Optional[List[str]] = None) -> WebServer:
-    global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE, AUTORELOAD, RELOAD_EXTRA_FILES
+def start_server(application=app, bind: str = '0.0.0.0', port: int = 8000, cors_allow_origin: Union[Iterable, str] = None, cors_methods: Union[Iterable, str] = None, cookie_max_age: int = 7 * 24 * 3600, handler=RequestHandler, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, default_email: Optional[str] = None, default_email_username: Optional[str] = None, default_email_password: Optional[str] = None, default_email_host: Optional[str] = None, default_email_port: Optional[int] = None) -> WebServer:
+    global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE, AUTORELOAD, RELOAD_EXTRA_FILES, DEBUG, ADMINS
     server = WebServer((bind, port), handler)
     server.application = application
-    CORES_ORIGIN_ALLOW = {c.lower() for c in cors_allow_origin} if isinstance(cors_allow_origin, (list, set, dict, tuple)) else {c for c in cors_allow_origin.lower().strip().split(',') if c}
-    CORS_METHODS_ALLOW = {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
+    CORES_ORIGIN_ALLOW = {c.lower() for c in cors_allow_origin} if isinstance(cors_allow_origin, (list, set, dict, tuple)) else {c for c in cors_allow_origin.lower().strip().split(',') if c} if cors_allow_origin else set()
+    CORS_METHODS_ALLOW = {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c} if cors_methods else set()
+    DEBUG = debug
+    ADMINS = admins or []
     COOKIE_AGE = cookie_max_age
-    # AUTORELOAD = autoreload
-    RELOAD_EXTRA_FILES = {f: None for f in reload_extra_files or []}
+    DEFAULT_EMAIL['from'] = default_email or ''
+    DEFAULT_EMAIL['user'] = default_email_username or ''
+    DEFAULT_EMAIL['password'] = default_email_password or ''
+    DEFAULT_EMAIL['host'] = default_email_host or ''
+    DEFAULT_EMAIL['port'] = default_email_port or 25
+    if DEFAULT_EMAIL['from'] and not DEFAULT_EMAIL['user']:
+        DEFAULT_EMAIL['user'] = DEFAULT_EMAIL['from']
+    elif not DEFAULT_EMAIL['from'] and DEFAULT_EMAIL['user']:
+        DEFAULT_EMAIL['from'] = DEFAULT_EMAIL['user']
     print('Server Started on', f'{bind}:{port}')
     if serve:
-        # if autoreload or any(f.autoreload for f in URLS.values()) or reload_extra_files:
-        #     Thread(target=reloading).start()
         server.serve()
     return server
 
 
-def start_with_args(app=app, bind_default: str = '0.0.0.0', port_default: int = 8000, cors_allow_origin='', cors_methods='', cookie_max_age: int = 7 * 24 * 3600, serve: bool = True, autoreload: bool = False, *, reload_extra_files: Optional[List[str]] = None) -> WebServer:
+def start_with_args(app=app, bind_default: str = '0.0.0.0', port_default: int = 8000, cors_allow_origin: str = '', cors_methods: str = '', cookie_max_age: int = 7 * 24 * 3600, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, from_email: Optional[str] = None, from_user: Optional[str] = None, from_password: Optional[str] = None, from_host: Optional[str] = None, from_port: Optional[int] = None) -> WebServer:
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default=bind_default)
     parser.add_argument('-p', '--port', default=port_default, type=int)
     parser.add_argument('--cors_allow_origin', default=cors_allow_origin)
     parser.add_argument('--cors_methods', default=cors_methods)
     parser.add_argument('--cookie_max_age', default=cookie_max_age)
-    # parser.add_argument('--autoreload', action='store_true', default=autoreload)
-    return start_server(app, **parser.parse_args().__dict__, serve=serve, reload_extra_files=reload_extra_files)
+    parser.add_argument('-d', '--debug', action='store_true', default=debug)
+    parser.add_argument('-a', '--admins', action='append', default=admins)
+    parser.add_argument('--default_email', default=from_email)
+    parser.add_argument('--default_email_username', default=from_user)
+    parser.add_argument('--default_email_password', default=from_password)
+    parser.add_argument('--default_email_host', default=from_host)
+    parser.add_argument('--default_email_port', default=from_port, type=int)
+    return start_server(app, **parser.parse_args().__dict__, serve=serve)
 
 
 if __name__ == '__main__':

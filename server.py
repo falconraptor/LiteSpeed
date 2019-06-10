@@ -18,6 +18,7 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
+from os import remove
 from os.path import exists
 from pprint import pformat
 from smtplib import SMTP
@@ -591,8 +592,9 @@ def send_email(subject: str, body: str, to: Union[str, Iterable], _from: Optiona
             if ctype is None or encoding is not None:
                 ctype = 'application/octet-stream'
             maintype, subtype = ctype.split('/', 1)
-            with open(file, 'rb') as file:
-                cids.append((file.read(), maintype, subtype, cid))
+            with open(file, 'rb') as fp:
+                cids.append((fp.read(), maintype, subtype, cid))
+            remove(file)
     if html:
         m.add_alternative(html, subtype='html')
         for cid in cids:

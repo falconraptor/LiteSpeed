@@ -584,6 +584,7 @@ def send_email(subject: str, body: str, to: Union[str, Iterable], _from: Optiona
         for file in (extra_embed or []) + re.findall(r'(?:href="|src=")([\w/._-]+\.\w+)"', html):
             cid = make_msgid()
             html.replace(file, f'cid:{cid[1:-1]}')
+            old = file
             if file[:4] == 'http':
                 with urlopen(file) as fp, open(file.split('/')[-1], 'wb') as tmp:
                     tmp.write(fp.read())
@@ -594,7 +595,8 @@ def send_email(subject: str, body: str, to: Union[str, Iterable], _from: Optiona
             maintype, subtype = ctype.split('/', 1)
             with open(file, 'rb') as fp:
                 cids.append((fp.read(), maintype, subtype, cid))
-            remove(file)
+            if old[:4] == 'http':
+                remove(file)
     if html:
         m.add_alternative(html, subtype='html')
         for cid in cids:

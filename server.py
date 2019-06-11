@@ -23,6 +23,7 @@ from os.path import exists
 from pprint import pformat
 from smtplib import SMTP
 from socketserver import ThreadingTCPServer
+from threading import Thread
 from typing import Optional, Tuple, List, Dict, Union, Any, Iterable
 from urllib.parse import unquote, unquote_plus
 from urllib.request import urlopen
@@ -552,7 +553,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.server.client_left(self)
 
 
-def send_email(subject: str, body: str, to: Union[str, Iterable], _from: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable]] = None, bcc: Optional[Union[str, Iterable]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None):
+def send_email(subject: str, body: str, to: Union[str, Iterable], _from: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable]] = None, bcc: Optional[Union[str, Iterable]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True):
     if not _from:
         _from = DEFAULT_EMAIL['from']
     if not host:
@@ -610,10 +611,17 @@ def send_email(subject: str, body: str, to: Union[str, Iterable], _from: Optiona
                 maintype, subtype = ctype.split('/', 1)
                 with open(f, 'rb') as fp:
                     m.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=f)
-    with SMTP(host, port) as s:
-        s.starttls()
-        s.login(username, password)
-        s.send_message(m)
+
+    def send():
+        with SMTP(host, port) as s:
+            s.starttls()
+            s.login(username, password)
+            s.send_message(m)
+
+    if in_thread:
+        Thread(target=send).start()
+    else:
+        send()
 
 
 def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, f=None):

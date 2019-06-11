@@ -335,9 +335,7 @@ class ServerHandler(SimpleHandler):
         if ADMINS:
             send_email(f'Internal Server Error: {environ.PATH_INFO}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=er.decode())
         start_response(self.error_status, self.error_headers[:] if not DEBUG else [('Content-Type', 'text/html')], sys.exc_info())
-        if DEBUG:
-            return [er]
-        return [self.error_body]
+        return [er] if DEBUG else [self.error_body]
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -553,7 +551,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.server.client_left(self)
 
 
-def send_email(subject: str, body: str, to: Union[str, Iterable], _from: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable]] = None, bcc: Optional[Union[str, Iterable]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True):
+def send_email(subject: str, body: str, to: Union[str, Iterable[str]], _from: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True):
     if not _from:
         _from = DEFAULT_EMAIL['from']
     if not host:
@@ -715,8 +713,6 @@ def app(env, start_response):
         result = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
         if ADMINS:
             send_email(f'Internal Server Error: {env.PATH_INFO}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=result[0].decode())
-        if not DEBUG:
-            raise e
     if result:
         def process_headers(request_headers):
             if isinstance(request_headers, dict):

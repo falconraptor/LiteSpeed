@@ -121,7 +121,7 @@ class ExceptionReporter:
 
     def get_traceback_html(self):
         """Return HTML version of debug 500 HTTP error page."""
-        return render(self.request, 'webserver/html/500.html', self.get_traceback_data())
+        return render(self.request, 'webserver/html/500.html', self.get_traceback_data(), status_override=500)
 
     @staticmethod
     def force_text(s, encoding='utf-8', strings_only=False, errors='strict'):
@@ -332,7 +332,7 @@ class ServerHandler(SimpleHandler):
     def error_output(self, environ, start_response):
         environ = Request(environ)
         er = ExceptionReporter(environ, *sys.exc_info()).get_traceback_html()[0]
-        if ADMINS:
+        if ADMINS and not DEBUG:
             send_email(f'Internal Server Error: {environ.PATH_INFO}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=er.decode())
         start_response(self.error_status, self.error_headers[:] if not DEBUG else [('Content-Type', 'text/html')], sys.exc_info())
         return [er] if DEBUG else [self.error_body]
@@ -583,19 +583,12 @@ def send_email(subject: str, body: str, to: Union[str, Iterable[str]], _from: Op
         for file in (extra_embed or []) + re.findall(r'(?:href="|src=")([\w/._-]+\.\w+)"', html):
             cid = make_msgid()
             html.replace(file, f'cid:{cid[1:-1]}')
-            old = file
-            if file[:4] == 'http':
-                with urlopen(file) as fp, open(file.split('/')[-1], 'wb') as tmp:
-                    tmp.write(fp.read())
-                file = file.split('/')[-1]
             ctype, encoding = mimetypes.guess_type(file)
             if ctype is None or encoding is not None:
                 ctype = 'application/octet-stream'
             maintype, subtype = ctype.split('/', 1)
             with open(file, 'rb') as fp:
                 cids.append((fp.read(), maintype, subtype, cid))
-            if old[:4] == 'http':
-                remove(file)
     if html:
         m.add_alternative(html, subtype='html')
         for cid in cids:
@@ -713,6 +706,8 @@ def app(env, start_response):
         result = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
         if ADMINS:
             send_email(f'Internal Server Error: {env.PATH_INFO}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=result[0].decode())
+        if DEBUG:
+            raise e
     if result:
         def process_headers(request_headers):
             if isinstance(request_headers, dict):
@@ -766,7 +761,7 @@ def app(env, start_response):
     return body
 
 
-def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = None) -> Tuple[bytes, int, Dict[str, str]]:
+def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = None, status_override: int = None) -> Tuple[bytes, int, Dict[str, str]]:
     file = file.replace('../', '')
     ext = file.split('.')[-1]
     if headers is None:
@@ -784,16 +779,16 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
         headers['Cache-Control'] = f'max-age={cache_age}'
     elif not cache_age and ext != 'html':
         headers['Cache-Control'] = 'max-age=3600'
-    return lines, 200, headers
+    return lines, status_override or 200, headers
 
 
-def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Optional[Union[List[str], str]] = None) -> Tuple[bytes, int, Dict[str, str]]:
+def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Optional[Union[List[str], str]] = None, status_override: int = None) -> Tuple[bytes, int, Dict[str, str]]:
     if data is None:
         data = {}
     if files is None:
         files = []
-    lines, status, headers = serve(file, cache_age)
-    if status == 200:
+    lines, status, headers = serve(file, cache_age, status_override=status_override)
+    if status in {200, status_override}:
         lines = lines.decode()
         if isinstance(files, str):
             files = [files]
@@ -822,7 +817,7 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
                     if DEBUG:
                         print(files, match, e.__repr__(), locals().keys())
         lines = re.sub(r'<?/?~~[\w.\'"()\[\]\s{}?=/\\<>:,-_#]+~~>?', '', lines).encode()
-    return lines, status, headers
+    return lines, status_override or status, headers
 
 
 def start_server(application=app, bind: str = '0.0.0.0', port: int = 8000, cors_allow_origin: Union[Iterable, str] = None, cors_methods: Union[Iterable, str] = None, cookie_max_age: int = 7 * 24 * 3600, handler=RequestHandler, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, default_email: Optional[str] = None, default_email_username: Optional[str] = None, default_email_password: Optional[str] = None, default_email_host: Optional[str] = None, default_email_port: Optional[int] = None) -> WebServer:

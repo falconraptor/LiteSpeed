@@ -18,7 +18,6 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
-from os import remove
 from os.path import exists
 from pprint import pformat
 from smtplib import SMTP
@@ -26,7 +25,6 @@ from socketserver import ThreadingTCPServer
 from threading import Thread
 from typing import Optional, Tuple, List, Dict, Union, Any, Iterable
 from urllib.parse import unquote, unquote_plus
-from urllib.request import urlopen
 from wsgiref.handlers import SimpleHandler
 
 __ROUTE_CACHE = {}

@@ -80,6 +80,8 @@ class ExceptionReporter:
             if 'vars' in frame:
                 frame_vars = []
                 for k, v in frame['vars']:
+                    if isinstance(v, Request):
+                        continue
                     try:
                         if isinstance(v, (Iterable, dict)):
                             v = json.dumps(v, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')

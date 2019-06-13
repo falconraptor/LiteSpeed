@@ -83,8 +83,10 @@ class ExceptionReporter:
                     if isinstance(v, Request):
                         continue
                     try:
-                        if isinstance(v, (Iterable, dict)):
-                            v = json.dumps(v, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
+                        if isinstance(v, Dict):
+                            v = json.dumps({k: _ for k, _ in v.items() if not isinstance(_, Request)}, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
+                        elif isinstance(v, Iterable) and not isinstance(v, str):
+                            v = json.dumps([_ for _ in v if not isinstance(_, Request)], indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
                     except Exception:
                         pass
                     if not isinstance(v, str):
@@ -330,7 +332,8 @@ class ServerHandler(SimpleHandler):
             super().close()
 
     def error_output(self, environ, start_response):
-        environ = Request(environ)
+        if environ:
+            environ = Request(environ)
         er = ExceptionReporter(environ, *sys.exc_info()).get_traceback_html()[0]
         if ADMINS and not DEBUG:
             send_email(f'Internal Server Error: {environ.PATH_INFO}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=er.decode())
@@ -706,8 +709,6 @@ def app(env, start_response):
         result = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
         if ADMINS:
             send_email(f'Internal Server Error: {env.PATH_INFO}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=result[0].decode())
-        if DEBUG:
-            raise e
     if result:
         def process_headers(request_headers):
             if isinstance(request_headers, dict):

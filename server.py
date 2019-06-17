@@ -802,13 +802,13 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
                 with open(file, 'rt') as _in:
                     data.update({k: v for k, v in find.findall(_in.read())})
         for _ in range(2):
-            for key, value in data.items():
-                if isinstance(value, str):
-                    lines = lines.replace(f'~~{key}~~', value)
             for file in re.findall(r'~~includes ([\w\s./\\-]+)~~', lines):
                 if exists(file):
                     with open(file) as _in:
                         lines = lines.replace(f'~~includes {file}~~', _in.read())
+            for key, value in data.items():
+                if isinstance(value, str):
+                    lines = lines.replace(f'~~{key}~~', value)
             for match in re.findall(r'(<?~~([^~]+)~~>?)', lines):
                 if match[1][0] == '<':
                     continue
@@ -817,7 +817,7 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
                 except Exception as e:
                     if DEBUG:
                         print(files, match, e.__repr__(), locals().keys())
-        lines = re.sub(r'<?/?~~[\w.\'"()\[\]\s{}?=/\\<>:,-_#]+~~>?', '', lines).encode()
+        lines = re.sub(r'<?/?~~[^~]+~~>?', '', lines).encode()
     return lines, status_override or status, headers
 
 

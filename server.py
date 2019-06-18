@@ -327,7 +327,7 @@ class ServerHandler(SimpleHandler):
 
     def close(self):
         try:
-            self.request_handler.log_request(self.status.split(' ', 1)[0], self.bytes_sent)
+            self.request_handler.log_request((self.status or '').split(' ', 1)[0], self.bytes_sent)
         finally:
             super().close()
 
@@ -727,7 +727,7 @@ def app(env, start_response):
                     process_headers(result[2])
             if callable(body):
                 body = body()
-            if isinstance(body, dict):
+            elif isinstance(body, dict):
                 body = json.dumps(body, default=json_serial).encode()
                 headers['Content-Type'] = 'application/json; charset=utf-8'
         elif isinstance(result, dict):

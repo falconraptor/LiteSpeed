@@ -89,12 +89,7 @@ class ExceptionReporter:
                             v = json.dumps([_ for _ in v if not isinstance(_, Request)], indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
                     except Exception as e:
                         v = f"Error in formatting: {e.__class__.__name__}: {e}".replace('<', '&lt;').replace('>', '&gt;')
-                    if not isinstance(v, str):
-                        try:
-                            v = pformat(v).replace('<', '&lt;').replace('>', '&gt;')
-                        except Exception as e:
-                            v = f"Error in formatting: {e.__class__.__name__}: {e}".replace('<', '&lt;').replace('>', '&gt;')
-                    frame_vars.append((k, v))
+                    frame_vars.append((k, repr(v) if not isinstance(v, str) else v))
                 frame['vars'] = frame_vars
             frames[i] = frame
         unicode_hint = ''

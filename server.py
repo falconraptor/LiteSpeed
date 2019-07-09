@@ -19,7 +19,6 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 from os.path import exists
-from pprint import pformat
 from smtplib import SMTP
 from socketserver import ThreadingTCPServer
 from threading import Thread
@@ -556,14 +555,14 @@ def send_email(subject: str, body: str, to: Union[str, Iterable[str]], _from: Op
         host = DEFAULT_EMAIL['host']
     if port != DEFAULT_EMAIL['port']:
         port = DEFAULT_EMAIL['port']
-    if not username:
-        username = DEFAULT_EMAIL['user']
     if not password:
         password = DEFAULT_EMAIL['password']
     if not _from and username:
         _from = username
     elif not username and _from:
         username = _from
+    if not username:
+        username = DEFAULT_EMAIL['user']
     if not _from or not host or not username or not password or not port or not any((to, cc, bcc)) or not any((subject, body, html, attachments)):
         raise NotImplementedError('Must supply From or Username, Host, Password, Port, any of Subject, Body, HTML, Attachments, and any of TO, CC, BCC!')
     m = EmailMessage()

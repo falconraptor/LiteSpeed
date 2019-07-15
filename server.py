@@ -468,6 +468,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             if self.valid_client:
                 while self.keep_alive:
                     self.read_next_message()
+                return
         handler = ServerHandler(self.rfile, self.wfile, sys.stderr, env)
         handler.request_handler = self
         handler.run(self.server.application)

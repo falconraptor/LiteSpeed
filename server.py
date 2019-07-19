@@ -310,6 +310,7 @@ class WebServer(ThreadingTCPServer):
             client['handler'].send_json(obj)
 
     def serve(self):
+        print('Server Started on', f'{self.server_address}')
         try:
             self.serve_forever(.1)
         except KeyboardInterrupt:
@@ -438,6 +439,20 @@ class RequestHandler(BaseHTTPRequestHandler):
                         request_method[k] = [request_method[k], v]
                 else:
                     request_method[k] = v
+        elif content_type == 'multipart/form-data':
+            for q in re.sub(r'-{15,}\d+', '+@~!@+', env['BODY'].decode().replace('\n', '')).split('+@~!@+'):
+                if '=' in q:
+                    q = q.split(';')[1].strip().split('=')[1].replace('"', '').split('\r\r')
+                    k, v = [unquote_plus(a) if a else a for a in q]
+                    v = v.replace('\r', '')
+                    request_method = env[env['REQUEST_METHOD']]
+                    if k in request_method:
+                        try:
+                            request_method[k].append(v)
+                        except AttributeError:
+                            request_method[k] = [request_method[k], v]
+                    else:
+                        request_method[k] = v
         if env['QUERY_STRING']:
             for q in env['QUERY_STRING'].split('&'):
                 q = q.split('=') if '=' in q else (q, None)
@@ -549,7 +564,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.server.client_left(self)
 
 
-def send_email(subject: str, body: str, to: Union[str, Iterable[str]], _from: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True):
+def send_email(subject: str, body: str, to: Union[str, Iterable[str]], _from: Optional[str] = None, reply_to: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True):
     if not _from:
         _from = DEFAULT_EMAIL['from']
     if not host:
@@ -570,11 +585,13 @@ def send_email(subject: str, body: str, to: Union[str, Iterable[str]], _from: Op
     m['Subject'] = subject
     m['From'] = _from
     if to:
-        m['To'] = ','.join(to) if isinstance(to, Iterable) else to
+        m['To'] = ','.join(to) if not isinstance(to, str) else to
     if cc:
-        m['CC'] = ','.join(cc) if isinstance(cc, Iterable) else cc
+        m['CC'] = ','.join(cc) if not isinstance(cc, str) else cc
     if bcc:
-        m['BCC'] = ','.join(bcc) if isinstance(bcc, Iterable) else bcc
+        m['BCC'] = ','.join(bcc) if not isinstance(bcc, str) else bcc
+    if reply_to:
+        m['Reply-To'] = ','.join(reply_to) if not isinstance(reply_to, str) else reply_to
     m.set_content(body)
     cids = []
     if embed_files and html:
@@ -592,7 +609,7 @@ def send_email(subject: str, body: str, to: Union[str, Iterable[str]], _from: Op
         for cid in cids:
             m.get_payload()[1].add_related(cid[0], cid[1], cid[2], cid=cid[3])
     if attachments:
-        for f in (attachments if isinstance(attachments, Iterable) else [attachments]):
+        for f in (list(attachments) if not isinstance(attachments, str) else [attachments]):
             if exists(f):
                 ctype, encoding = mimetypes.guess_type(f)
                 if ctype is None or encoding is not None:
@@ -834,7 +851,6 @@ def start_server(application=app, bind: str = '0.0.0.0', port: int = 8000, cors_
         DEFAULT_EMAIL['user'] = DEFAULT_EMAIL['from']
     elif not DEFAULT_EMAIL['from'] and DEFAULT_EMAIL['user']:
         DEFAULT_EMAIL['from'] = DEFAULT_EMAIL['user']
-    print('Server Started on', f'{bind}:{port}')
     if serve:
         server.serve()
     return server

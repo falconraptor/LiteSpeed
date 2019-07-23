@@ -269,12 +269,13 @@ class WebServer(ThreadingTCPServer):
     def message_received(self, handler, msg):
         self.handle(self.handlers[id(handler)], 'message', msg)
 
-    def new_client(self, handler):
+    def new_client(self, handler, env):
         self.id_counter += 1
         client = {
             'id': self.id_counter,
             'handler': handler,
-            'address': handler.client_address
+            'address': handler.client_address,
+            'request': env
         }
         self.clients[client['id']] = client
         self.handlers[id(client['handler'])] = client
@@ -489,7 +490,6 @@ class RequestHandler(BaseHTTPRequestHandler):
         handler.run(self.server.application)
 
     def read_next_message(self):
-        b1, b2 = 0, 0
         try:
             b1, b2 = self.rfile.read(2)
         except ConnectionResetError as e:
@@ -497,11 +497,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.keep_alive = False
             return
         except ValueError:
-            pass
+            b1, b2 = 0, 0
         opcode = b1 & 0x0f
-        masked = b2 & 0x80
         payload_length = b2 & 0x7f
-        if opcode == 0x8 or not masked:
+        if opcode == 0x8 or not b2 & 0x80:
             self.keep_alive = False
             return
         if opcode == 0x2:  # binary
@@ -526,7 +525,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         self.handshake_done = self.request.send(f'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {b64encode(sha1((self.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).strip().decode("ASCII")}\r\n\r\n'.encode())
         self.valid_client = True
-        self.server.new_client(self)
+        self.server.new_client(self, env)
 
     def send_message(self, message, opcode: int = 0x1):
         """Important: Fragmented(=continuation) messages are not supported since their usage cases are limited - when we don't know the payload length."""

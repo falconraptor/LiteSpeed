@@ -550,6 +550,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             header.extend(struct.pack(">Q", payload_length))
         else:
             raise Exception("Message is too big. Consider breaking it into chunks.")
+        if self.request._closed:
+            self.finish()
+            return
         try:
             self.request.send(header + payload)
         except Exception as e:

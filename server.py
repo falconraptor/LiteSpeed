@@ -83,9 +83,15 @@ class ExceptionReporter:
                         continue
                     try:
                         if isinstance(v, Dict):
-                            v = json.dumps({k: _ for k, _ in v.items() if not isinstance(_, Request)}, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
+                            if len(v) > 1000:
+                                v = f'Length: {len(v)}'
+                            else:
+                                v = json.dumps({k: _ for k, _ in v.items() if not isinstance(_, Request)}, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
                         elif isinstance(v, Iterable) and not isinstance(v, str):
-                            v = json.dumps([_ for _ in v if not isinstance(_, Request)], indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
+                            if len(v) > 1000:
+                                v = f'Length: {len(v)}'
+                            else:
+                                v = json.dumps([_ for _ in v if not isinstance(_, Request)], indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
                     except Exception as e:
                         v = f"Error in formatting: {e.__class__.__name__}: {e}".replace('<', '&lt;').replace('>', '&gt;')
                     frame_vars.append((k, repr(v) if not isinstance(v, str) else v))

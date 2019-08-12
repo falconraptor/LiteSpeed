@@ -569,7 +569,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.server.client_left(self)
 
 
-def send_email(subject: str, body: str, to: Union[str, Iterable[str]], _from: Optional[str] = None, reply_to: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True):
+def send_email(subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True):
     if not _from:
         _from = DEFAULT_EMAIL['from']
     if not host:

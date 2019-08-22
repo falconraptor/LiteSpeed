@@ -527,7 +527,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         opcode_handler(self, message_bytes.decode('utf8'))
 
     def handshake(self, env):
-        if env['REQUEST_METHOD'] != 'GET' or self.headers.get('upgrade', '').lower() != 'websocket' or 'sec-websocket-key' not in self.headers:
+        if env['REQUEST_METHOD'] != 'GET' or env.get('UPGRADE', '').lower() != 'websocket' or 'sec-websocket-key' not in self.headers:
             return
         self.handshake_done = self.request.send(f'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {b64encode(sha1((self.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).strip().decode("ASCII")}\r\n\r\n'.encode())
         self.valid_client = True

@@ -281,10 +281,11 @@ class WebServer(ThreadingTCPServer):
             'id': self.id_counter,
             'handler': handler,
             'address': handler.client_address,
-            'request': env
+            'request': env,
+            'handler_id': id(handler)
         }
         self.clients[client['id']] = client
-        self.handlers[id(client['handler'])] = client
+        self.handlers[client['handler_id']] = client
         self.handle(client, 'new')
 
     def client_left(self, handler):
@@ -292,9 +293,17 @@ class WebServer(ThreadingTCPServer):
             client = self.handlers[id(handler)]
             self.handle(client, 'left')
             del self.clients[client['id']]
-            del self.handlers[id(client['handler'])]
+            del self.handlers[client['handler_id']]
         except KeyError:
             pass
+        for client in list(self.clients.values()):
+            if client['handler'].connection._closed:
+                del self.clients[client['id']]
+                del self.handlers[client['handler_id']]
+        for client in list(self.handlers.values()):
+            if client['handler'].connection._closed:
+                del self.clients[client['id']]
+                del self.handlers[client['handler_id']]
 
     def handle(self, client, type: str, msg=None):
         for f in self.functions[type]:

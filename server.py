@@ -389,21 +389,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         env['CONTENT_LENGTH'] = int(self.headers.get('content-length', '0'))
         while len(env['BODY']) != env['CONTENT_LENGTH']:
             env['BODY'] += self.rfile.read(1)
-        boundary = re.findall(r'boundary=-*([\w]+)', env['CONTENT_TYPE'])
+        boundary = re.findall(r'boundary=-*([\w]+)', self.headers.get('content-type', ''))
         content_type = env['CONTENT_TYPE'].lower()
         if boundary:
             boundary = boundary[0] + '--'
             line, content, name, filename = '', '', '', ''
             dashes = re.compile(r'-*')
-            re_name = re.compile(r'name="([\w]+)"')
-            re_filename = re.compile(r'filename="([\w.\-]+)"')
+            re_name = re.compile(r'name="(.*?)"')
+            re_filename = re.compile(r'filename="(.*?)"')
             file = None
             skip_first = True
-            body = env['BODY'].split('\n')
+            body = env['BODY'].split(b'\n')
             i = 0
-            env['BODY'] = []
             while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
-                line = body[i]
+                line = body[i] + (b'\n' if i < len(body) else b'')
                 decoded = ''
                 try:
                     decoded = line.decode().replace('\r', '').replace('\n', '')
@@ -412,27 +411,23 @@ class RequestHandler(BaseHTTPRequestHandler):
                             name, filename, content = '', '', ''
                             skip_first = True
                             if file:
-                                file.close()
+                                file.seek(0)
                         if not content:
                             if not name:
                                 name = re_name.findall(decoded)
-                                if name:
-                                    name = name[0]
+                                name = name[0] if name else ''
                             if not filename:
                                 filename = re_filename.findall(decoded)
                                 if filename:
                                     filename = filename[0]
-                                    file = open(filename, 'bw')
+                                    file = BytesIO()
                             if decoded.startswith('Content-Type'):
                                 content = decoded.split(' ')[-1]
-                    if not content:
-                        line = decoded
                 except UnicodeDecodeError:
                     pass
-                env['BODY'].append(line)
                 if content and ((decoded and not decoded.startswith('Content-Type')) or not decoded):
                     if name not in env['FILES']:
-                        env['FILES'][name] = filename
+                        env['FILES'][name] = (filename, file)
                     if not skip_first:
                         file.write(line)
                     else:
@@ -440,7 +435,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 elif name and ((decoded and not re_name.findall(decoded)) or decoded != line) and not filename:
                     env[env['REQUEST_METHOD']][name] = decoded if decoded and dashes.sub('', decoded, 1) != boundary else line
                     name = ''
-            i += 1
+                if not content:
+                    line = decoded
+                i += 1
         elif content_type == 'application/json' and env['BODY']:
             env[env['REQUEST_METHOD']] = json.loads(env['BODY'])
         elif content_type == 'application/x-www-form-urlencoded':

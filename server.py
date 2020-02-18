@@ -376,6 +376,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         """Read headers / body and generate Request object.
         :returns:Request"""
         env = Request({'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}, 'COOKIE': SimpleCookie(self.headers.get('COOKIE')), 'HEADERS': dict(self.headers), 'REMOTE_ADDR': self.client_address[0], 'CONTENT_TYPE': self.headers.get_content_type()})
+        env['HEADERS'] = {k.upper().strip(): v for k, v in env['HEADERS'].items()}
         path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
         env['PATH_INFO'] = unquote(path, 'iso-8859-1')
         host = self.address_string()
@@ -526,7 +527,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         opcode_handler(self, message_bytes.decode('utf8'))
 
     def handshake(self, env: dict):
-        if env['REQUEST_METHOD'] != 'GET' or env['HEADERS'].lower() != 'websocket' or 'sec-websocket-key' not in self.headers:
+        if env['REQUEST_METHOD'] != 'GET' or env['HEADERS'].get('UPGRADE', '').lower() != 'websocket' or 'sec-websocket-key' not in self.headers:
             return
         self.handshake_done = self.request.send(f'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {b64encode(sha1((self.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).strip().decode("ASCII")}\r\n\r\n'.encode())
         self.valid_client = True
@@ -723,6 +724,7 @@ def app(env: dict, start_response: Callable) -> List[bytes]:
                 start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
                 return [b'']
     env = Request(env)
+    cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
     try:
         result = f[0](env, *f[1], **f[2])
     except Exception:
@@ -779,7 +781,6 @@ def app(env: dict, start_response: Callable) -> List[bytes]:
                 body = [compressed_body]
             headers['Content-Length'] = str(compressed_len)
             headers['Content-Encoding'] = 'gzip'
-    cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
     start_response(status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie])
     return body
 

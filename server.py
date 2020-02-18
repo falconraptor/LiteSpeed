@@ -22,7 +22,7 @@ from os.path import exists
 from smtplib import SMTP
 from socketserver import ThreadingTCPServer
 from threading import Thread
-from typing import Optional, Tuple, List, Dict, Union, Any, Iterable
+from typing import Optional, Tuple, List, Dict, Union, Any, Iterable, Callable
 from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
 
@@ -42,8 +42,9 @@ DEFAULT_EMAIL = {
 }
 
 
-def json_serial(obj):
-    """JSON serializer for objects not serializable by default json code"""
+def json_serial(obj: Any) -> Union[list, str, dict]:
+    """JSON serializer for objects not serializable by default json code.
+    :returns:Union[list, str, dict]"""
     try:
         if hasattr(obj, 'isoformat'):
             return obj.isoformat()
@@ -72,10 +73,11 @@ class ExceptionReporter:
         self.tb = tb
         self.postmortem = None
 
-    def get_traceback_data(self):
-        """Return a dictionary containing traceback information."""
+    def get_traceback_data(self) -> Dict[str, Any]:
+        """Return a dictionary containing traceback information.
+        :returns:Dict[str, Any]"""
         frames = self.get_traceback_frames()
-        for i, frame in enumerate(frames):
+        for frame in frames:
             if 'vars' in frame:
                 frame_vars = []
                 for k, v in frame['vars']:
@@ -96,7 +98,6 @@ class ExceptionReporter:
                         v = f"Error in formatting: {e.__class__.__name__}: {e}".replace('<', '&lt;').replace('>', '&gt;')
                     frame_vars.append((k, repr(v) if not isinstance(v, str) else v))
                 frame['vars'] = frame_vars
-            frames[i] = frame
         unicode_hint = ''
         if self.exc_type and issubclass(self.exc_type, UnicodeError):
             start = getattr(self.exc_value, 'start', None)
@@ -121,32 +122,28 @@ class ExceptionReporter:
             c['lastframe'] = frames[-1]
         return c
 
-    def get_traceback_html(self):
-        """Return HTML version of debug 500 HTTP error page."""
+    def get_traceback_html(self) -> Tuple[bytes, int, Dict[str, str]]:
+        """Return HTML version of debug 500 HTTP error page.
+        :returns:Tuple[bytes, int, Dict[str, str]]"""
         return render(self.request, 'webserver/html/500.html', self.get_traceback_data(), status_override=500)
 
     @staticmethod
-    def force_text(s, encoding='utf-8', strings_only=False, errors='strict'):
-        """Similar to smart_text, except that lazy instances are resolved to strings, rather than kept as lazy objects.
-
+    def force_text(s, encoding: str = 'utf-8', strings_only: bool = False, errors: str = 'strict'):
+        """Converts objects to str.
         If strings_only is True, don't convert (some) non-string-like objects."""
         if issubclass(type(s), str) or (strings_only and isinstance(s, (type(None), int, float, Decimal, datetime, date, time))):
             return s
         try:
-            if isinstance(s, bytes):
-                s = str(s, encoding, errors)
-            else:
-                s = str(s)
+            s = str(s, encoding, errors) if isinstance(s, bytes) else str(s)
         except UnicodeDecodeError as e:
             raise Exception(f'{e}. You passed in {s!r} ({type(s)})')
         return s
 
     @staticmethod
-    def _get_lines_from_file(filename, lineno, context_lines, loader=None, module_name=None):
-        """
-        Return context_lines before and after lineno from file.
+    def _get_lines_from_file(filename: str, lineno: int, context_lines: int, loader=None, module_name=None) -> Tuple[Optional[int], List[str], str, List[str]]:
+        """Return context_lines before and after lineno from file.
         Return (pre_context_lineno, pre_context, context_line, post_context).
-        """
+        :returns:Tuple[Optional[int], List[str], str, List[str]]"""
         source = None
         if hasattr(loader, 'get_source'):
             try:
@@ -158,26 +155,27 @@ class ExceptionReporter:
         if source is None:
             try:
                 with open(filename, 'rb') as fp:
-                    source = fp.read().splitlines()
+                    source = fp.readlines()
             except (OSError, IOError):
                 pass
-        if source is None:
-            return None, [], None, []
-        # If we just read the source from a file, or if the loader did not apply tokenize.detect_encoding to decode the source into a string, then we should do that ourselves.
-        if isinstance(source[0], bytes):
+            if source is None:
+                return None, [], '', []
+        if isinstance(source[0], bytes):  # If we just read the source from a file, or if the loader did not apply tokenize.detect_encoding to decode the source into a string, then we should do that ourselves.
             encoding = 'ascii'
             for line in source[:2]:
-                # File coding may be specified. Match pattern from PEP-263  (https://www.python.org/dev/peps/pep-0263/)
-                match = re.search(br'coding[:=]\s*([-\w.]+)', line)
+                match = re.search(br'coding[:=]\s*([-\w.]+)', line)  # File coding may be specified. Match pattern from PEP-263  (https://www.python.org/dev/peps/pep-0263/)
                 if match:
                     encoding = match.group(1).decode('ascii')
                     break
-            source = [str(sline, encoding, 'replace') for sline in source]
+            source = [str(_, encoding, 'replace') for _ in source]
         lower_bound = max(0, lineno - context_lines)
         return lower_bound, source[lower_bound:lineno], source[lineno], source[lineno + 1:lineno + context_lines]
 
-    def get_traceback_frames(self):
+    def get_traceback_frames(self) -> List[Dict[str, Any]]:
+        """Returns a list of the traceback frames
+        :returns:List[Dict[str, Any]]"""
         def explicit_or_implicit_cause(exc_value):
+            """Return the cause of the exception. Returns the implicit if explicit does not exist."""
             return getattr(exc_value, '__cause__', None) or getattr(exc_value, '__context__', None)
 
         # Get the exception and all its causes
@@ -186,34 +184,27 @@ class ExceptionReporter:
         while exc_value:
             exceptions.append(exc_value)
             exc_value = explicit_or_implicit_cause(exc_value)
-        # No exceptions were supplied to ExceptionReporter
-        if not exceptions:
+        if not exceptions:  # No exceptions were supplied to ExceptionReporter
             return []
-        # In case there's just one exception, take the traceback from self.tb
         frames = []
         exc_value = exceptions.pop()
-        tb = self.tb if not exceptions else exc_value.__traceback__
+        tb = self.tb if not exceptions else exc_value.__traceback__  # In case there's just one exception, take the traceback from self.tb
         while tb is not None:
-            # Support for __traceback_hide__ which is used by a few libraries to hide internal frames.
-            if tb.tb_frame.f_locals.get('__traceback_hide__'):
+            if tb.tb_frame.f_locals.get('__traceback_hide__'):  # Support for __traceback_hide__ which is used by a few libraries to hide internal frames.
                 tb = tb.tb_next
                 continue
             filename = tb.tb_frame.f_code.co_filename
-            function = tb.tb_frame.f_code.co_name
             lineno = tb.tb_lineno - 1
-            module_name = tb.tb_frame.f_globals.get('__name__') or ''
-            pre_context_lineno, pre_context, context_line, post_context = self._get_lines_from_file(filename, lineno, 7, tb.tb_frame.f_globals.get('__loader__'), module_name)
+            pre_context_lineno, pre_context, context_line, post_context = self._get_lines_from_file(filename, lineno, 7, tb.tb_frame.f_globals.get('__loader__'), tb.tb_frame.f_globals.get('__name__') or '')
             if pre_context_lineno is None:
                 pre_context_lineno = lineno
-                pre_context = []
                 context_line = '<source code not available>'
-                post_context = []
             frames.append({
                 'exc_cause': explicit_or_implicit_cause(exc_value),
                 'exc_cause_explicit': getattr(exc_value, '__cause__', True),
                 'tb': tb,
                 'filename': filename,
-                'function': function,
+                'function': tb.tb_frame.f_code.co_name,
                 'lineno': lineno + 1,
                 'vars': tb.tb_frame.f_locals.items(),
                 'id': id(tb),
@@ -232,6 +223,8 @@ class ExceptionReporter:
 
 
 class Request(dict):
+    """Custom dict implementation to allow for cookies / sessions and accessing of dict keys as attributes"""
+
     def __getattribute__(self, name):
         try:
             return super().__getattribute__(name)
@@ -258,7 +251,7 @@ class WebServer(ThreadingTCPServer):
     clients, handlers = {}, {}
     id_counter = 0
 
-    def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):
+    def __init__(self, server_address, RequestHandlerClass, bind_and_activate: bool = True):
         super().__init__(server_address, RequestHandlerClass, bind_and_activate)
         self.functions = {'new': [], 'message': [], 'left': []}
 
@@ -337,12 +330,14 @@ class ServerHandler(SimpleHandler):
     os_environ = {}
 
     def close(self):
+        """Override to log requests to console."""
         try:
             self.request_handler.log_request((self.status or '').split(' ', 1)[0], self.bytes_sent)
         finally:
             super().close()
 
-    def error_output(self, environ, start_response) -> List[bytes]:
+    def error_output(self, environ: dict, start_response: Callable) -> List[bytes]:
+        """Override to email ADMINS or send debug page."""
         if environ:
             environ = Request(environ)
         er = ExceptionReporter(environ, *sys.exc_info()).get_traceback_html()[0]
@@ -353,8 +348,8 @@ class ServerHandler(SimpleHandler):
 
 
 class RequestHandler(BaseHTTPRequestHandler):
-    """
-    websocket packet
+    """"""
+    """websocket packet
     +-+-+-+-+-------+-+-------------+-------------------------------+
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -377,19 +372,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         super().__init__(request, client_address, server)
         self.raw_requestline, self.requestline, self.request_version, self.command = '', '', '', ''
 
-    def get_environ(self):
-        env = Request({'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}, 'COOKIE': SimpleCookie()})
+    def get_environ(self) -> Request[str, Any]:
+        """Read headers / body and generate Request object.
+        :returns:Request[str, Any]"""
+        env = Request({'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}, 'COOKIE': SimpleCookie(self.headers.get('COOKIE')), 'HEADERS': dict(self.headers), 'REMOTE_ADDR': self.client_address[0], 'CONTENT_TYPE': self.headers.get_content_type()})
         path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
         env['PATH_INFO'] = unquote(path, 'iso-8859-1')
         host = self.address_string()
         if host != self.client_address[0]:
             env['REMOTE_HOST'] = host
-        env['REMOTE_ADDR'] = self.client_address[0]
-        env['CONTENT_TYPE'] = self.headers.get_content_type()
         env['CONTENT_LENGTH'] = int(self.headers.get('content-length', '0'))
         while len(env['BODY']) != env['CONTENT_LENGTH']:
             env['BODY'] += self.rfile.read(1)
-        boundary = re.findall(r'boundary=-*([\w]+)', self.headers.get('content-type', ''))
+        boundary = re.findall(r'boundary=-*([\w]+)', self.headers.get('content-type', ''))  # boundary is used to catch multipart form data (includes file uploads)
         content_type = env['CONTENT_TYPE'].lower()
         if boundary:
             boundary = boundary[0] + '--'
@@ -403,7 +398,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             i = 0
             while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
                 line = body[i] + (b'\n' if i < len(body) else b'')
-                decoded = ''
                 try:
                     decoded = line.decode().replace('\r', '').replace('\n', '')
                     if decoded:
@@ -424,7 +418,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             if decoded.startswith('Content-Type'):
                                 content = decoded.split(' ')[-1]
                 except UnicodeDecodeError:
-                    pass
+                    decoded = ''
                 if content and ((decoded and not decoded.startswith('Content-Type')) or not decoded):
                     if name not in env['FILES']:
                         env['FILES'][name] = (filename, file)
@@ -455,7 +449,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif content_type == 'multipart/form-data':
             for q in re.sub(r'-{15,}\d+', '+@~!@+', env['BODY'].decode().replace('\n', '')).split('+@~!@+'):
                 if '=' in q:
-                    q = q.split(';')[1].strip().split('=')[1].replace('"', '').split('\r\r')
+                    q = q.split(';')[1].strip().split('=', 1)[1].replace('"', '').split('\r\r')
                     k, v = [unquote_plus(a) if a else a for a in q]
                     v = v.replace('\r', '')
                     request_method = env[env['REQUEST_METHOD']]
@@ -468,7 +462,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         request_method[k] = v
         if env['QUERY_STRING']:
             for q in env['QUERY_STRING'].split('&'):
-                q = q.split('=') if '=' in q else (q, None)
+                q = q.split('=', 1) if '=' in q else (q, None)
                 k, v = [unquote_plus(a) if a else a for a in q]
                 get = env['GET']
                 if k in get:
@@ -478,8 +472,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                         get[k] = [get[k], v]
                 else:
                     get[k] = v
-        env['COOKIE'] = SimpleCookie(self.headers.get('COOKIE'))
-        env.update({k.replace('-', '_').upper(): v.strip() for k, v in self.headers.items() if k.replace('-', '_').upper() not in env})
         return env
 
     def handle(self):
@@ -491,7 +483,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not self.parse_request():
             return
         env = self.get_environ()
-        if any(self.server.functions.values()):
+        if any(self.server.functions.values()):  # only handshakes websockets if there is a function to handle them
             self.handshake(env)
             if self.valid_client:
                 while self.keep_alive:
@@ -502,6 +494,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         handler.run(self.server.application)
 
     def read_next_message(self):
+        """Used to get messages from the websocket"""
         try:
             b1, b2 = self.rfile.read(2)
         except ConnectionResetError as e:
@@ -512,10 +505,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             b1, b2 = 0, 0
         opcode = b1 & 0x0f
         payload_length = b2 & 0x7f
-        if opcode == 0x8 or not b2 & 0x80:
+        if opcode == 0x8 or not b2 & 0x80:  # disconnect
             self.keep_alive = False
             return
-        if opcode == 0x2:  # binary
+        if opcode == 0x2:  # binary (Not supported)
             return
         elif opcode == 0x1:  # text
             opcode_handler = self.server.message_received
@@ -532,14 +525,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             message_bytes.append(message_byte ^ masks[len(message_bytes) % 4])
         opcode_handler(self, message_bytes.decode('utf8'))
 
-    def handshake(self, env):
-        if env['REQUEST_METHOD'] != 'GET' or env.get('UPGRADE', '').lower() != 'websocket' or 'sec-websocket-key' not in self.headers:
+    def handshake(self, env: dict):
+        if env['REQUEST_METHOD'] != 'GET' or env['HEADERS'].lower() != 'websocket' or 'sec-websocket-key' not in self.headers:
             return
         self.handshake_done = self.request.send(f'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {b64encode(sha1((self.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).strip().decode("ASCII")}\r\n\r\n'.encode())
         self.valid_client = True
         self.server.new_client(self, env)
 
-    def send_message(self, message, opcode: int = 0x1):
+    def send_message(self, message, opcode: int = 0x1) -> bool:
         """Important: Fragmented(=continuation) messages are not supported since their usage cases are limited - when we don't know the payload length."""
         if isinstance(message, bytes):
             try:
@@ -571,11 +564,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_message(json.dumps(message, default=json_serial))
 
     def finish(self):
+        """Websocket disconnect"""
         super().finish()
         self.server.client_left(self)
 
 
 def send_email(subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True, tls: bool = True):
+    """Wrapper around EmailMessage.
+    Handles attachments, embeds, send later in another thread, tls."""
     if not _from:
         _from = DEFAULT_EMAIL['from']
     if not host:
@@ -642,7 +638,8 @@ def send_email(subject: str, body: str, to: Optional[Union[str, Iterable[str]]] 
         send()
 
 
-def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, f=None):
+def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, f: Callable = None):
+    """Handles adding function to urls"""
     def decorated(func) -> partial:
         nonlocal url, route_name
         if url is None:
@@ -667,20 +664,21 @@ def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: 
     return decorated
 
 
-def compress_string(s) -> bytes:
+def compress_string(s: str) -> bytes:
+    """Compresses a string using gzip"""
     zbuf = BytesIO()
     with GzipFile(mode='wb', compresslevel=6, fileobj=zbuf, mtime=0) as zfile:
         zfile.write(s)
     return zbuf.getvalue()
 
 
-def app(env, start_response):
-    cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
+def app(env: dict, start_response: Callable) -> List[bytes]:
+    """Handles request from client"""
     path = env['PATH_INFO']
-    if path[-1] != '/' and '.' not in path[-5:]:
-        start_response('307 Moved Permanently', [('Location', path + '/')])
+    if path[-1] != '/' and '.' not in path[-5:]:  # auto rediects to url that ends in / if there is no . in the end of the url (marks it as a file)
+        start_response('307 Moved Permanently', [('Location', f'{path}/')])
         return [b'']
-    if path not in __ROUTE_CACHE:
+    if path not in __ROUTE_CACHE:  # finds url from urls and adds to ROUTE_CACHE to prevent future lookups
         for _, url in URLS.items():
             m = url.re.fullmatch(path[1:]) or url.re.fullmatch(path)
             if m:
@@ -691,23 +689,21 @@ def app(env, start_response):
                 __ROUTE_CACHE[path] = (url, groups, m.groupdict())
                 url.cache.append(path)
                 break
-    if path not in __ROUTE_CACHE:
-        start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
-        return [b'']
+        else:
+            start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
+            return [b'']
     f = __ROUTE_CACHE[path]
-    if '*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods:
+    if '*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods:  # checks for allowed methods
         start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
         return [b'']
-    body = ''
     headers = {}
-    status = '200 OK'
     methods = f[0].cors_methods or CORS_METHODS_ALLOW
-    if methods:
+    if methods:  # checks for cors allowed methods using route override of global
         if '*' in methods:
             headers['Access-Control-Allow-Method'] = '*'
         elif env['REQUEST_METHOD'].lower() in methods:
             headers['Access-Control-Allow-Method'] = env['REQUEST_METHOD']
-            cors = f[0].cors or CORES_ORIGIN_ALLOW
+            cors = f[0].cors or CORES_ORIGIN_ALLOW  # checks for cors allowed dowmains using route override of global
             if cors:
                 if '*' in cors:
                     headers['Access-Control-Allow-Origin'] = '*'
@@ -717,7 +713,7 @@ def app(env, start_response):
                     start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
                     return [b'']
     else:
-        cors = f[0].cors or CORES_ORIGIN_ALLOW
+        cors = f[0].cors or CORES_ORIGIN_ALLOW  # checks for cors allowed dowmains using route override of global
         if cors:
             if '*' in cors:
                 headers['Access-Control-Allow-Origin'] = '*'
@@ -729,18 +725,21 @@ def app(env, start_response):
     env = Request(env)
     try:
         result = f[0](env, *f[1], **f[2])
-    except Exception as e:
-        result = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
-        if ADMINS:
-            send_email(f'Internal Server Error: {env.PATH_INFO}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=result[0].decode())
-    if result:
+    except Exception:
+        e = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
+        if ADMINS and not DEBUG:
+            send_email(f'Internal Server Error: {env["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=e[0].decode())
+        result = e if DEBUG else None
+    body = ''
+    status = '200 OK'
+    if result:  # if result is not None parse for body, status, headers
         def process_headers(request_headers):
             if isinstance(request_headers, dict):
                 headers.update(request_headers)
             elif isinstance(request_headers, tuple):
                 headers.update(dict(request_headers))
             elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
-                headers.update({r[0]: r[1] for r in result})
+                headers.update(dict(result))
 
         if isinstance(result, (tuple, type(namedtuple), list)):
             l_result = len(result)
@@ -768,46 +767,54 @@ def app(env, start_response):
                 headers['Content-Type'] = 'application/json; charset=utf-8'
         elif isinstance(result, (str, bytes)):
             body = result
-    if 'Content-Type' not in headers:
+    if 'Content-Type' not in headers:  # add default html header if none passed
         headers['Content-Type'] = 'text/html; charset=utf-8'
     body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else [str(body).encode()] if isinstance(body, int) else body
-    l = len(body[0])
-    if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and l > 200 and 'image' not in headers.get('Content-Type', '').lower():
-        compressed_body = compress_string(body[0])
-        cl = len(compressed_body)
-        if cl < l:
-            body = [compressed_body]
-        # print(l, cl)
-        headers['Content-Length'] = str(cl)
-        headers['Content-Encoding'] = 'gzip'
-    headers = [(k, v) for k, v in headers.items()]
-    headers.extend(('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie)
-    start_response(status, headers)
+    if body:
+        body_len = len(body[0])
+        if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and body_len > 200 and 'image' not in headers.get('Content-Type', '').lower():
+            compressed_body = compress_string(body[0])
+            compressed_len = len(compressed_body)
+            if compressed_len < body_len:
+                body = [compressed_body]
+            headers['Content-Length'] = str(compressed_len)
+            headers['Content-Encoding'] = 'gzip'
+    cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
+    start_response(status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie])
     return body
 
 
 def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = None, status_override: int = None) -> Tuple[bytes, int, Dict[str, str]]:
-    file = file.replace('../', '')
-    ext = file.split('.')[-1]
+    """Send a file to the client.
+    Allows for cache and header specification. Also allows to return a different status code than 200
+    :returns:Tuple[bytes, int, Dict[str, str]]"""
+    file = file.replace('../', '')  # prevent serving files outside of current / specified dir (prevents download of all system files)
     if headers is None:
         headers = {}
-    if not exists(file):
+    if not exists(file):  # return 404 on file not exists
         return b'', 404, {}
     with open(file, 'rb') as _in:
         lines = _in.read()
-    if 'Content-Type' not in headers:
+    if 'Content-Type' not in headers:  # if content-type is not already specified then guess from mimetype
         ctype, encoding = mimetypes.guess_type(file)
         if ctype is None or encoding is not None:
             ctype = 'application/octet-stream'
         headers['Content-Type'] = ctype
     if cache_age > 0:
         headers['Cache-Control'] = f'max-age={cache_age}'
-    elif not cache_age and ext != 'html':
+    elif not cache_age and file.split('.')[-1] != 'html' and not DEBUG:  # if cache_age is not specified and not an html file and not debug then autoset cache_age to 1 hour
         headers['Cache-Control'] = 'max-age=3600'
     return lines, status_override or 200, headers
 
 
 def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Optional[Union[List[str], str]] = None, status_override: int = None) -> Tuple[bytes, int, Dict[str, str]]:
+    """Send a file to the client, replacing ~~ controls to help with rendering blocks.
+    Allows for ~~extends [file]~~, ~~includes [file]~~, and content blocks <~~[name]~~>[content]</~~[name]~~>.
+    Extends will inject the blocks from this file to the one specified.
+    Includes will paste the specified file in that spot.
+    Contect blocks can be specified by ~~[name]~~ and used in files that extend <~~[name]~~>[content]</~~[name]~~>.
+    Also allows for pure python by doing ~~[python code that returns / is a string]~~
+    :returns:Tuple[bytes, int, Dict[str, str]] """
     if data is None:
         data = {}
     if files is None:
@@ -869,6 +876,7 @@ def start_server(application=app, bind: str = '0.0.0.0', port: int = 8000, cors_
 
 
 def start_with_args(app=app, bind_default: str = '0.0.0.0', port_default: int = 8000, cors_allow_origin: str = '', cors_methods: str = '', cookie_max_age: int = 7 * 24 * 3600, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, from_email: Optional[str] = None, from_user: Optional[str] = None, from_password: Optional[str] = None, from_host: Optional[str] = None, from_port: Optional[int] = None) -> WebServer:
+    """Allows you to specify a lot of parameters for start_server"""
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default=bind_default)
     parser.add_argument('-p', '--port', default=port_default, type=int)
@@ -885,10 +893,9 @@ def start_with_args(app=app, bind_default: str = '0.0.0.0', port_default: int = 
     return start_server(app, **parser.parse_args().__dict__, serve=serve)
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # example index page (does not have to be in __name__=='__main__')
     @route()
     def index(request):
         return [b'Not Implemented']
-
-
+    # routes must be declared before start_server or start_with_args because start_server will block until shutdown
     start_with_args()

@@ -1,6 +1,14 @@
 from .server import route, serve, URLS, start_with_args, Request
 
 
+"""Any function with a route decorator must follow one of the following return patterns:
+render(filename, dict)
+static(filename)
+str or bytes (body)
+str or bytes (body), int (status code)
+str or bytes (body), int (status code), dict (headers)"""
+
+
 @route()  # uses method name to generate url: /test/
 def test(request):
     return 'Testing'  # return text only with default 200 status
@@ -13,7 +21,7 @@ def other(request):
 
 @route('other/txt', methods=['post'])  # specify url and lock to certain methods: anything but post will return 405
 def another(request):
-    return 'Txt', 204  # return text and status 204
+    return 'Txt', 204  # return text and status 204 (no content)
 
 
 @route()  # uses method name to generate url: /json/
@@ -21,7 +29,7 @@ def json(request):
     return request  # return json version of request
 
 
-@route('(\d{2})')  # use regex groups to generate url: /[any 2 digit number]/
+@route(r'(\d{2})')  # use regex groups to generate url: /[any 2 digit number]/
 def test2(request, num):
     return 'Test2 [{}]'.format(num)  # return text only with default 200 status
 
@@ -46,9 +54,9 @@ def readme(request):
     return serve('README.md')  # serve a file
 
 
-@route('([\w.]+)')
+@route(r'([\w.]+)')
 def file(request, file):
-    return serve(file)  # serve a parameter
+    return serve(file)  # serve a file from a parameter
 
 
 @route(cors_methods=['get'], cors='*')  # set cors (cross origin) to allow from any domain if its a get request
@@ -69,4 +77,4 @@ def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____
 
 route(r'num/(?P<num>\d+)', f=test2)  # add function to routes without decorator: /num/[any number]/
 if __name__ == '__main__':
-    start_with_args()
+    start_with_args()  # routes should be declared before start

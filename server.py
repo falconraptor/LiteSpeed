@@ -372,9 +372,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         super().__init__(request, client_address, server)
         self.raw_requestline, self.requestline, self.request_version, self.command = '', '', '', ''
 
-    def get_environ(self) -> Request[str, Any]:
+    def get_environ(self) -> Request:
         """Read headers / body and generate Request object.
-        :returns:Request[str, Any]"""
+        :returns:Request"""
         env = Request({'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}, 'COOKIE': SimpleCookie(self.headers.get('COOKIE')), 'HEADERS': dict(self.headers), 'REMOTE_ADDR': self.client_address[0], 'CONTENT_TYPE': self.headers.get_content_type()})
         path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
         env['PATH_INFO'] = unquote(path, 'iso-8859-1')

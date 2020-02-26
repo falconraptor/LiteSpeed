@@ -90,10 +90,12 @@ class ExceptionReporter:
                             else:
                                 v = json.dumps({k: _ for k, _ in v.items() if not isinstance(_, Request)}, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
                         elif isinstance(v, Iterable) and not isinstance(v, str):
-                            if len(v) > 1000:
+                            if hasattr(v, '__len__') and len(v) > 1000:
                                 v = f'Length: {len(v)}'
                             else:
                                 v = json.dumps([_ for _ in v if not isinstance(_, Request)], indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
+                        else:
+                            v = repr(v)
                     except Exception as e:
                         v = f"Error in formatting: {e.__class__.__name__}: {e}".replace('<', '&lt;').replace('>', '&gt;')
                     frame_vars.append((k, repr(v) if not isinstance(v, str) else v))
@@ -559,7 +561,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             self.request.send(header + payload)
         except Exception as e:
-            print(self.client_address, e)
+            print(self.client_address, e, message)
 
     def send_json(self, message):
         self.send_message(json.dumps(message, default=json_serial))

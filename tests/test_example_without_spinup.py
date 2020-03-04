@@ -20,7 +20,7 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
     allowed_methods = {method.upper() for method in allowed_methods}
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
         data = {}
-        result = app({'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method, method: method_params}, lambda status, headers: data.update({'status': status, 'headers': dict(data['headers'])}))
+        result = app({'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method, method: method_params}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         if method in allowed_methods or '*' in allowed_methods:
             assert result == expected_result
             assert data['status'] == STATUS[expected_status]

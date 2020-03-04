@@ -1,4 +1,6 @@
-![Lint and Test: master](https://github.com/falconraptor/webserver/workflows/Lint%20and%20Text/badge.svg?branch=master)![Lint and Test: dev](https://github.com/falconraptor/webserver/workflows/Lint%20and%20Text/badge.svg?branch=dev)
+master: ![Lint and Test: master](https://github.com/falconraptor/webserver/workflows/Lint%20and%20Test/badge.svg?branch=master)
+
+dev: ![Lint and Test: dev](https://github.com/falconraptor/webserver/workflows/Lint%20and%20Test/badge.svg?branch=dev)
 
 # Webserver
 

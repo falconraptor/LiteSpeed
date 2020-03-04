@@ -8,7 +8,7 @@ from _pydecimal import Decimal
 from argparse import ArgumentParser
 from base64 import b64encode
 from collections import namedtuple
-from datetime import datetime, date, time
+from datetime import date, datetime, time
 from email.message import EmailMessage
 from email.utils import make_msgid
 from functools import partial
@@ -22,7 +22,7 @@ from os.path import exists
 from smtplib import SMTP
 from socketserver import ThreadingTCPServer
 from threading import Thread
-from typing import Optional, Tuple, List, Dict, Union, Any, Iterable, Callable
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
 
@@ -678,12 +678,12 @@ def compress_string(s: str) -> bytes:
 def app(env: dict, start_response: Callable) -> List[bytes]:
     """Handles request from client"""
     path = env['PATH_INFO']
-    if path[-1] != '/' and '.' not in path[-5:]:  # auto rediects to url that ends in / if there is no . in the end of the url (marks it as a file)
+    if path[-1:] != '/' and '.' not in path[-5:]:  # auto rediects to url that ends in / if there is no . in the end of the url (marks it as a file)
         start_response('307 Moved Permanently', [('Location', f'{path}/')])
         return [b'']
     if path not in __ROUTE_CACHE:  # finds url from urls and adds to ROUTE_CACHE to prevent future lookups
         for _, url in URLS.items():
-            m = url.re.fullmatch(path[1:]) or url.re.fullmatch(path)
+            m = url.re.fullmatch(path[1:]) if path and path[0] == '/' and url.re.pattern[0] != '/' else url.re.fullmatch(path)
             if m:
                 groups = m.groups()
                 for key, value in m.groupdict().items():
@@ -715,6 +715,9 @@ def app(env: dict, start_response: Callable) -> List[bytes]:
                 else:
                     start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
                     return [b'']
+        else:
+            start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
+            return [b'']
     else:
         cors = f[0].cors or CORES_ORIGIN_ALLOW  # checks for cors allowed dowmains using route override of global
         if cors:
@@ -748,8 +751,11 @@ def app(env: dict, start_response: Callable) -> List[bytes]:
         if isinstance(result, (tuple, type(namedtuple), list)):
             l_result = len(result)
             body = result[0] if l_result <= 3 else result
-            if 3 >= l_result > 1 and result[1]:
-                status = STATUS[result[1]] if isinstance(result[1], int) else result[1]
+            if 3 >= l_result > 1:
+                if not result[1]:
+                    status = STATUS[200]
+                else:
+                    status = STATUS[result[1]] if isinstance(result[1], int) else result[1]
                 if l_result > 2 and result[2]:
                     process_headers(result[2])
             if callable(body):

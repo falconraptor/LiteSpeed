@@ -1,7 +1,8 @@
 from http.cookies import SimpleCookie
 from typing import Iterable
 
-from server import app, STATUS, URLS
+from example import URLS
+from server import app, STATUS
 
 
 def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: Iterable[bytes], expected_headers: dict = None, skip_405: bool = False, method_params: dict = None):

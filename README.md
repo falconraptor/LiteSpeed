@@ -1,3 +1,5 @@
+![](https://github.com/falconraptor/webserver/workflows/Lint%20and%20Text/badge.svg?branch=master)![](https://github.com/falconraptor/webserver/workflows/Lint%20and%20Text/badge.svg?branch=dev)
+
 # Webserver
 
 Just a simple-fast-multithreading webserver that is mostly customizable and only relies on pure python 3.6+.
@@ -9,6 +11,9 @@ Has a built in rendering system using the render method. A complicated example o
 
 1. make sure your project is git
 2. run `git submodule add htts://github.com/falconraptor/webserver`
+
+OR
+1. clone this project 
 
 ## Usage
 

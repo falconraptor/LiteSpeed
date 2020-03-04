@@ -1,4 +1,7 @@
-from .server import Request, route, serve, start_with_args, URLS
+try:
+    from .server import Request, route, serve, start_with_args, URLS, render
+except ImportError:
+    from server import Request, route, serve, start_with_args, URLS, render
 
 """Any function with a route decorator must follow one of the following return patterns:
 render(filename, dict)
@@ -13,7 +16,7 @@ def test(request):
     return 'Testing'  # return text only with default 200 status
 
 
-@route('example')  # specify url directly: /example/
+@route('example2')  # specify url directly: /example2/
 def other(request):
     return 'Other', None, {'Testing': 'Header'}  # return text and header values with default 200 status
 
@@ -35,12 +38,12 @@ def test2(request, num):
 
 @route()  # uses method name to generate url but because it is index: /
 def index(request):
-    return [f'<a href="{func.url}">{name}</a><br>' for name, func in URLS.items()]  # return list of public which gets joined and sent to client
+    return [f'<a href="{func.url}">{name}</a><br>' for name, func in URLS.items()]  # return list of urls which gets joined and sent to client
 
 
 @route()  # uses method name to generate url: /index2/
 def index2(request):  # for use when len(urls) <= 3
-    return [f'<a href="{func.url}">{name}</a><br>' for name, func in URLS.items()], 200  # return list of public which gets joined and sent to client with status 200
+    return [f'<a href="{func.url}">{name}</a><br>' for name, func in URLS.items()], 200  # return list of urls which gets joined and sent to client with status 200
 
 
 @route(r'(?P<year>\d{4})/(?P<article>\d+)')  # use regex named groups to generate url: /[any 4 digit number]/[any number]/
@@ -59,8 +62,8 @@ def file(request, file):
 
 
 @route(cors_methods=['get'], cors='*')  # set cors (cross origin) to allow from any domain if its a get request
-def render(request):
-    return render('README.md', {'test': request.GET.get('test', '')})  # replace ~~test~~ in the readme file with what is in the get request for the variable test
+def render_example(request):
+    return render(request, 'README.md', {'test': request.GET.get('test', '')})  # replace ~~test~~ in the readme file with what is in the get request for the variable test
 
 
 def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____"

@@ -1,3 +1,4 @@
+import mimetypes
 from http.cookies import SimpleCookie
 from typing import Iterable
 
@@ -74,7 +75,7 @@ def test_article():
 
 def test_readme():
     with open('README.md', 'rb') as readme:
-        url_test('/example/readme/', ('*',), 200, [readme.read()], {'Content-Type': 'application/octet-stream'})
+        url_test('/example/readme/', ('*',), 200, [readme.read()], {'Content-Type': mimetypes.guess_type('README.md')})
 
 
 def test_file():

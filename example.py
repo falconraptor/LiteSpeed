@@ -1,5 +1,4 @@
-from .server import route, serve, URLS, start_with_args, Request
-
+from .server import Request, route, serve, start_with_args, URLS
 
 """Any function with a route decorator must follow one of the following return patterns:
 render(filename, dict)
@@ -31,22 +30,22 @@ def json(request):
 
 @route(r'(\d{2})')  # use regex groups to generate url: /[any 2 digit number]/
 def test2(request, num):
-    return 'Test2 [{}]'.format(num)  # return text only with default 200 status
+    return f'Test2 [{num}]'  # return text only with default 200 status
 
 
 @route()  # uses method name to generate url but because it is index: /
 def index(request):
-    return ['<a href="{}">{}</a><br>'.format(func.url, name) for name, func in URLS.items()]  # return list of public which gets joined and sent to client
+    return [f'<a href="{func.url}">{name}</a><br>' for name, func in URLS.items()]  # return list of public which gets joined and sent to client
 
 
 @route()  # uses method name to generate url: /index2/
 def index2(request):  # for use when len(urls) <= 3
-    return ['<a href="{}">{}</a><br>'.format(func.url, name) for name, func in URLS.items()], 200  # return list of public which gets joined and sent to client with status 200
+    return [f'<a href="{func.url}">{name}</a><br>' for name, func in URLS.items()], 200  # return list of public which gets joined and sent to client with status 200
 
 
 @route(r'(?P<year>\d{4})/(?P<article>\d+)')  # use regex named groups to generate url: /[any 4 digit number]/[any number]/
 def article(request, article, year):
-    return 'This is article {} from year {}'.format(article, year)
+    return f'This is article {article} from year {year}'
 
 
 @route()
@@ -67,7 +66,7 @@ def render(request):
 def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____"
     def wrapped(*args, **kwargs):
         request = kwargs.get('request', args[0] if args else Request())  # get request args otherwise use blank data (only gets correct args when doing "@route() \n @auth" otherwise "@auth \n @route()" it will not have the request argument
-        if 'auth' not in request.COOKIE or request.COOKIE['auth'].value not in USERNAME_SET:
+        if 'auth' not in request.COOKIE or request.COOKIE['auth'].value not in set():
             return '', 303, {'Location': '/login/?next=' + request.PATH_INFO}  # should change /login/?next= to the url of login for you application
         return f(*args, **kwargs)
 

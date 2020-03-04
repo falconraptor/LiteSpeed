@@ -1,7 +1,9 @@
 # Webserver
 
-Just a simple-fast-multithreading webserver that is mostly customizable and only relies on pure python 3.4+.
+Just a simple-fast-multithreading webserver that is mostly customizable and only relies on pure python 3.6+.
 Has support for Cookies, Sessions, Websockets and serving files. It is similar to flask.
+
+Has a built in rendering system using the render method. A complicated example of this is the html/500.html file
 
 ## Installation
 
@@ -17,4 +19,5 @@ Any function with a route decorator must follow one of the following return patt
 - str or bytes (body), int (status code)
 - str or bytes (body), int (status code), dict (headers)
 
-~~test~~ (for example)
+---
+`~~test~~ (for example)`

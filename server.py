@@ -755,7 +755,7 @@ def app(env: dict, start_response: Callable) -> List[bytes]:
                 if not result[1]:
                     status = STATUS[200]
                 else:
-                    status = STATUS[result[1]] if isinstance(result[1], int) else result[1]
+                    status = STATUS[result[1]] if isinstance(result[1], int) else result[1] if not isinstance(result[1], HTTPStatus) else f'{result[1].value} {result[1].phrase}'
                 if l_result > 2 and result[2]:
                     process_headers(result[2])
             if callable(body):
@@ -769,7 +769,7 @@ def app(env: dict, start_response: Callable) -> List[bytes]:
                 if callable(body):
                     body = body()
             if 'status' in result:
-                status = STATUS[result['status']] if isinstance(result['status'], int) else result['status']
+                status = STATUS[result['status']] if isinstance(result['status'], int) else result['status'] if not isinstance(result['status'], HTTPStatus) else f'{result["status"].value} {result["status"].phrase}'
             if 'headers' in result:
                 process_headers(result['headers'])
             if not (body or status != '200 OK'):

@@ -381,9 +381,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         env['HEADERS'] = {k.upper().strip(): v for k, v in env['HEADERS'].items()}
         path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
         env['PATH_INFO'] = unquote(path, 'iso-8859-1')
-        host = self.address_string()
+        host = env['HEADERS'].get('X-REAL-IP') or env['HEADERS'].get('X-FORWARDED-FOR') or self.address_string()
         if host != self.client_address[0]:
             env['REMOTE_HOST'] = host
+            self.client_address = (host, self.client_address[1])
         env['CONTENT_LENGTH'] = int(self.headers.get('content-length', '0'))
         while len(env['BODY']) != env['CONTENT_LENGTH']:
             env['BODY'] += self.rfile.read(1)
@@ -570,6 +571,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         """Websocket disconnect"""
         super().finish()
         self.server.client_left(self)
+
+    def log_message(self, format: str, *args: Any) -> None:
+        sys.stderr.write(f"{self.address_string()} - [{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}] {format % args}\n")
 
 
 def send_email(subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True, tls: bool = True):
@@ -856,7 +860,7 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
                     lines = lines.replace(match[0], str(eval(match[1], {'request': request, 'data': data})))
                 except Exception as e:
                     if DEBUG:
-                        print(files, match, e.__repr__(), locals().keys())
+                        print(files, match[1], e.__repr__(), locals().keys(), sep='\t')
         lines = re.sub(r'<?/?~~[^~]+~~>?', '', lines).encode()
     return lines, status_override or status, headers
 

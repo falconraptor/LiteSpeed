@@ -577,8 +577,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 def send_email(subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True, tls: bool = True):
-    """Wrapper around EmailMessage.
-    Handles attachments, embeds, send later in another thread, tls."""
+    """Wrapper around EmailMessage. Handles attachments, embeds, send later in another thread, tls."""
     if not _from:
         _from = DEFAULT_EMAIL['from']
     if not host:
@@ -740,7 +739,7 @@ def app(env: dict, start_response: Callable) -> List[bytes]:
         e = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
         if ADMINS and not DEBUG:
             send_email(f'Internal Server Error: {env["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=e[0].decode())
-        result = e if DEBUG else None
+        result = e if DEBUG else ('', 500)
     body = ''
     status = '200 OK'
     if result:  # if result is not None parse for body, status, headers

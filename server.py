@@ -19,7 +19,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 from os.path import exists
-from smtplib import SMTP
+from smtplib import SMTP, SMTP_SSL
 from socketserver import ThreadingTCPServer
 from threading import Thread
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
@@ -576,13 +576,13 @@ class RequestHandler(BaseHTTPRequestHandler):
         sys.stderr.write(f"{self.address_string()} - [{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}] {format % args}\n")
 
 
-def send_email(subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True, tls: bool = True):
+def send_email(subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True, tls: bool = True, ssl: bool = False, timeout: float = 0):
     """Wrapper around EmailMessage. Handles attachments, embeds, send later in another thread, tls."""
     if not _from:
         _from = DEFAULT_EMAIL['from']
     if not host:
         host = DEFAULT_EMAIL['host']
-    if port != DEFAULT_EMAIL['port']:
+    if DEFAULT_EMAIL['host'] and not host:
         port = DEFAULT_EMAIL['port']
     if not password:
         password = DEFAULT_EMAIL['password']
@@ -632,8 +632,8 @@ def send_email(subject: str, body: str, to: Optional[Union[str, Iterable[str]]] 
                     m.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=f)
 
     def send():
-        with SMTP(host, port) as s:
-            if tls:
+        with (SMTP_SSL if ssl else SMTP)(host, port, **({'timeout': timeout} if timeout else {})) as s:
+            if tls and not ssl:
                 s.starttls()
             s.login(username, password)
             s.send_message(m)

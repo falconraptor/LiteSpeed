@@ -636,10 +636,11 @@ class Email:
                     s.starttls()
                 s.login(username, password)
                 s.send_message(self.message)
-            if not wait:
-                Thread(target=_send).start()
-            else:
-                _send()
+
+        if not wait:
+            Thread(target=_send).start()
+        else:
+            _send()
 
 
 def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, f: Callable = None):

@@ -564,7 +564,7 @@ class Email:
     """Wrapper around EmailMessage. Handles attachments, embeds, send later in another thread, tls, ssl."""
     default_email = {
         'from': '',
-        'user': '',
+        'username': '',
         'password': '',
         'host': '',
         'port': 25,
@@ -574,11 +574,9 @@ class Email:
     }
 
     def __init__(self, subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None):
-        if not _from:
-            _from = Email.default_email['from']
         m = self.message = EmailMessage()
         m['Subject'] = subject
-        m['From'] = _from
+        m['From'] = _from or self.default_email['from'] or self.default_email['username']
         if to:
             m['To'] = ','.join(to) if not isinstance(to, str) else to
         if cc:
@@ -623,6 +621,14 @@ class Email:
 
     def send(self, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, tls: bool = True, ssl: bool = False, timeout: Optional[int] = None, wait: bool = False):
         """actually send the email. uses values from defualt_email if none specified"""
+        if not host:
+            host = self.default_email['host']
+            port = self.default_email['port']
+            username = self.default_email['username']
+            password = self.default_email['password']
+            tls = self.default_email['tls']
+            ssl = self.default_email['ssl']
+            timeout = self.default_email['timeout']
 
         def _send():
             with (SMTP_SSL if ssl else SMTP)(host, port, **({'timeout': timeout} if timeout else {})) as s:
@@ -880,23 +886,19 @@ def start_server(application=App, bind: str = '0.0.0.0', port: int = 8000, cors_
     ADMINS = admins or []
     COOKIE_AGE = cookie_max_age
     Email.default_email['from'] = default_email or ''
-    Email.default_email['user'] = default_email_username or ''
+    Email.default_email['username'] = default_email_username or ''
     Email.default_email['password'] = default_email_password or ''
     Email.default_email['host'] = default_email_host or ''
     Email.default_email['port'] = default_email_port or 25
     Email.default_email['tls'] = default_email_tls or True
     Email.default_email['ssl'] = default_email_ssl or False
     Email.default_email['timeout'] = default_email_timeout or 0
-    if Email.default_email['from'] and not Email.default_email['user']:
-        Email.default_email['user'] = Email.default_email['from']
-    elif not Email.default_email['from'] and Email.default_email['user']:
-        Email.default_email['from'] = Email.default_email['user']
     if serve:
         server.serve()
     return server
 
 
-def start_with_args(app=App, bind_default: str = '0.0.0.0', port_default: int = 8000, cors_allow_origin: str = '', cors_methods: str = '', cookie_max_age: int = 7 * 24 * 3600, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, from_email: Optional[str] = None, from_user: Optional[str] = None, from_password: Optional[str] = None, from_host: Optional[str] = None, from_port: Optional[int] = None, from_tls: Optional[bool] = None, from_ssl: Optional[bool] = None, from_timeout: Optional[int] = None) -> WebServer:
+def start_with_args(app=App, bind_default: str = '0.0.0.0', port_default: int = 8000, cors_allow_origin: str = '', cors_methods: str = '', cookie_max_age: int = 7 * 24 * 3600, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, from_email: Optional[str] = None, from_username: Optional[str] = None, from_password: Optional[str] = None, from_host: Optional[str] = None, from_port: Optional[int] = None, from_tls: Optional[bool] = None, from_ssl: Optional[bool] = None, from_timeout: Optional[int] = None) -> WebServer:
     """Allows you to specify a lot of parameters for start_server"""
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default=bind_default)
@@ -907,7 +909,7 @@ def start_with_args(app=App, bind_default: str = '0.0.0.0', port_default: int = 
     parser.add_argument('-d', '--debug', action='store_true', default=debug)
     parser.add_argument('-a', '--admins', action='append', default=admins)
     parser.add_argument('--default_email', default=from_email)
-    parser.add_argument('--default_email_username', default=from_user)
+    parser.add_argument('--default_email_username', default=from_username)
     parser.add_argument('--default_email_password', default=from_password)
     parser.add_argument('--default_email_host', default=from_host)
     parser.add_argument('--default_email_port', default=from_port, type=int)

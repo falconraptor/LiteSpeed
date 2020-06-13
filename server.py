@@ -26,20 +26,9 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
 
-__ROUTE_CACHE = {}
 COOKIE_AGE = 3600
 CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW = set(), set()
-STATUS = {s.value: f'{s.value} {s.phrase}' for s in HTTPStatus}
-URLS = {}
-DEBUG = False
 ADMINS = []
-DEFAULT_EMAIL = {
-    'from': '',
-    'user': '',
-    'password': '',
-    'host': '',
-    'port': 25
-}
 
 
 def json_serial(obj: Any) -> Union[list, str, dict]:
@@ -149,18 +138,14 @@ class ExceptionReporter:
         source = None
         if hasattr(loader, 'get_source'):
             try:
-                source = loader.get_source(module_name)
+                source = loader.get_source(module_name).splitlines()
             except ImportError:
                 pass
-            if source is not None:
-                source = source.splitlines()
         if source is None:
             try:
                 with open(filename, 'rb') as fp:
                     source = fp.readlines()
             except (OSError, IOError):
-                pass
-            if source is None:
                 return None, [], '', []
         if isinstance(source[0], bytes):  # If we just read the source from a file, or if the loader did not apply tokenize.detect_encoding to decode the source into a string, then we should do that ourselves.
             encoding = 'ascii'
@@ -343,10 +328,10 @@ class ServerHandler(SimpleHandler):
         if environ:
             environ = Request(environ)
         er = ExceptionReporter(environ, *sys.exc_info()).get_traceback_html()[0]
-        if ADMINS and not DEBUG:
-            send_email(f'Internal Server Error: {environ.get("PATH_INFO", "???")}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=er.decode())
-        start_response(self.error_status, self.error_headers[:] if not DEBUG else [('Content-Type', 'text/html')], sys.exc_info())
-        return [er] if DEBUG else [self.error_body]
+        if ADMINS and not App.debug and Email.default_email['host']:
+            Email(f'Internal Server Error: {environ.get("PATH_INFO", "???")}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=er.decode()).send()
+        start_response(self.error_status, self.error_headers[:] if not App.debug else [('Content-Type', 'text/html')], sys.exc_info())
+        return [er] if App.debug else [self.error_body]
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -373,6 +358,68 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.valid_client = False
         super().__init__(request, client_address, server)
         self.raw_requestline, self.requestline, self.request_version, self.command = '', '', '', ''
+        
+    @staticmethod
+    def _get_boundary_enclosed(boundary: List[str], env: Request):
+        boundary = boundary[0] + '--'
+        line, content, name, filename = '', '', '', ''
+        dashes = re.compile(r'-*')
+        re_name = re.compile(r'name="(.*?)"')
+        re_filename = re.compile(r'filename="(.*?)"')
+        file = None
+        skip_first = True
+        body = env['BODY'].split(b'\n')
+        i = 0
+        while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
+            line = body[i] + (b'\n' if i < len(body) else b'')
+            try:
+                decoded = line.decode().replace('\r', '').replace('\n', '')
+                if decoded:
+                    if dashes.sub('', decoded, 1) in {boundary[:-2], boundary}:
+                        name, filename, content = '', '', ''
+                        skip_first = True
+                        if file:
+                            file.seek(0)
+                    if not content:
+                        if not name:
+                            name = re_name.findall(decoded)
+                            name = name[0] if name else ''
+                        if not filename:
+                            filename = re_filename.findall(decoded)
+                            if filename:
+                                filename = filename[0]
+                                file = BytesIO()
+                        if decoded.startswith('Content-Type'):
+                            content = decoded.split(' ')[-1]
+            except UnicodeDecodeError:
+                decoded = ''
+            if content and ((decoded and not decoded.startswith('Content-Type')) or not decoded):
+                if name not in env['FILES']:
+                    env['FILES'][name] = (filename, file)
+                if not skip_first:
+                    file.write(line)
+                else:
+                    skip_first = False
+            elif name and ((decoded and not re_name.findall(decoded)) or decoded != line) and not filename:
+                env[env['REQUEST_METHOD']][name] = decoded if decoded and dashes.sub('', decoded, 1) != boundary else line
+                name = ''
+            if not content:
+                line = decoded
+            i += 1
+            
+    @staticmethod
+    def _decode_form_urlencoded(data: str, method: str, env: Request):
+        for q in data:
+            q = q.split('=', 1) if '=' in q else (q, None)
+            k, v = [unquote_plus(a) if a else a for a in q]
+            request_method = env[method]
+            if k in request_method:
+                try:
+                    request_method[k].append(v)
+                except AttributeError:
+                    request_method[k] = [request_method[k], v]
+            else:
+                request_method[k] = v
 
     def get_environ(self) -> Request:
         """Read headers / body and generate Request object.
@@ -391,65 +438,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         boundary = re.findall(r'boundary=-*([\w]+)', self.headers.get('content-type', ''))  # boundary is used to catch multipart form data (includes file uploads)
         content_type = env['CONTENT_TYPE'].lower()
         if boundary:
-            boundary = boundary[0] + '--'
-            line, content, name, filename = '', '', '', ''
-            dashes = re.compile(r'-*')
-            re_name = re.compile(r'name="(.*?)"')
-            re_filename = re.compile(r'filename="(.*?)"')
-            file = None
-            skip_first = True
-            body = env['BODY'].split(b'\n')
-            i = 0
-            while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
-                line = body[i] + (b'\n' if i < len(body) else b'')
-                try:
-                    decoded = line.decode().replace('\r', '').replace('\n', '')
-                    if decoded:
-                        if dashes.sub('', decoded, 1) in {boundary[:-2], boundary}:
-                            name, filename, content = '', '', ''
-                            skip_first = True
-                            if file:
-                                file.seek(0)
-                        if not content:
-                            if not name:
-                                name = re_name.findall(decoded)
-                                name = name[0] if name else ''
-                            if not filename:
-                                filename = re_filename.findall(decoded)
-                                if filename:
-                                    filename = filename[0]
-                                    file = BytesIO()
-                            if decoded.startswith('Content-Type'):
-                                content = decoded.split(' ')[-1]
-                except UnicodeDecodeError:
-                    decoded = ''
-                if content and ((decoded and not decoded.startswith('Content-Type')) or not decoded):
-                    if name not in env['FILES']:
-                        env['FILES'][name] = (filename, file)
-                    if not skip_first:
-                        file.write(line)
-                    else:
-                        skip_first = False
-                elif name and ((decoded and not re_name.findall(decoded)) or decoded != line) and not filename:
-                    env[env['REQUEST_METHOD']][name] = decoded if decoded and dashes.sub('', decoded, 1) != boundary else line
-                    name = ''
-                if not content:
-                    line = decoded
-                i += 1
+            self._get_boundary_enclosed(boundary, env)
         elif content_type == 'application/json' and env['BODY']:
             env[env['REQUEST_METHOD']] = json.loads(env['BODY'])
         elif content_type == 'application/x-www-form-urlencoded':
-            for q in env['BODY'].decode().split('&'):
-                q = q.split('=', 1) if '=' in q else (q, None)
-                k, v = [unquote_plus(a) if a else a for a in q]
-                request_method = env[env['REQUEST_METHOD']]
-                if k in request_method:
-                    try:
-                        request_method[k].append(v)
-                    except AttributeError:
-                        request_method[k] = [request_method[k], v]
-                else:
-                    request_method[k] = v
+            self._decode_form_urlencoded(env['BODY'].decode().split('&'), env['REQUEST_METHOD'], env)
         elif content_type == 'multipart/form-data':
             for q in re.sub(r'-{15,}\d+', '+@~!@+', env['BODY'].decode().replace('\n', '')).split('+@~!@+'):
                 if '=' in q:
@@ -465,17 +458,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     else:
                         request_method[k] = v
         if env['QUERY_STRING']:
-            for q in env['QUERY_STRING'].split('&'):
-                q = q.split('=', 1) if '=' in q else (q, None)
-                k, v = [unquote_plus(a) if a else a for a in q]
-                get = env['GET']
-                if k in get:
-                    try:
-                        get[k].append(v)
-                    except AttributeError:
-                        get[k] = [get[k], v]
-                else:
-                    get[k] = v
+            self._decode_form_urlencoded(env['QUERY_STRING'].split('&'), 'GET', env)
         return env
 
     def handle(self):
@@ -574,74 +557,81 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         sys.stderr.write(f"{self.address_string()} - [{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}] {format % args}\n")
+        
+        
+class Email:
+    """Wrapper around EmailMessage. Handles attachments, embeds, send later in another thread, tls, ssl."""
+    default_email = {
+        'from': '',
+        'user': '',
+        'password': '',
+        'host': '',
+        'port': 25,
+        'ssl': False,
+        'tls': True,
+        'timeout': 0
+    }
+    
+    def __init__(self, subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None):
+        if not _from:
+            _from = Email.default_email['from']
+        m = self.message = EmailMessage()
+        m['Subject'] = subject
+        m['From'] = _from
+        if to:
+            m['To'] = ','.join(to) if not isinstance(to, str) else to
+        if cc:
+            m['CC'] = ','.join(cc) if not isinstance(cc, str) else cc
+        if bcc:
+            m['BCC'] = ','.join(bcc) if not isinstance(bcc, str) else bcc
+        if reply_to:
+            m['Reply-To'] = ','.join(reply_to) if not isinstance(reply_to, str) else reply_to
+        m.set_content(body)
+        self.html = html
+        if html:
+            m.add_alternative(html, subtype='html')
 
+    def embed(self, extra_embed: Optional[List[str]] = None, embed_files: bool = True):
+        cids = []
+        if embed_files and self.html:
+            for file in (extra_embed or []) + re.findall(r'(?:href="|src=")([\w/._-]+\.\w+)"', self.html):
+                cid = make_msgid()
+                self.html = self.html.replace(file, f'cid:{cid[1:-1]}')
+                ctype, encoding = mimetypes.guess_type(file)
+                if ctype is None or encoding is not None:
+                    ctype = 'application/octet-stream'
+                maintype, subtype = ctype.split('/', 1)
+                with open(file, 'rb') as fp:
+                    cids.append((fp.read(), maintype, subtype, cid))
+        if self.html:
+            self.message.add_alternative(self.html, subtype='html')
+            for cid in cids:
+                self.message.get_payload()[1].add_related(cid[0], cid[1], cid[2], cid=cid[3])
+        return self
 
-def send_email(subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, host: Optional[str] = None, port: int = 25, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None, attachments: List[str] = None, embed_files: bool = True, extra_embed: List[str] = None, in_thread: bool = True, tls: bool = True, ssl: bool = False, timeout: float = 0):
-    """Wrapper around EmailMessage. Handles attachments, embeds, send later in another thread, tls."""
-    if not _from:
-        _from = DEFAULT_EMAIL['from']
-    if not host:
-        host = DEFAULT_EMAIL['host']
-    if DEFAULT_EMAIL['host'] and not host:
-        port = DEFAULT_EMAIL['port']
-    if not password:
-        password = DEFAULT_EMAIL['password']
-    if not _from and username:
-        _from = username
-    elif not username and _from:
-        username = _from
-    if not username:
-        username = DEFAULT_EMAIL['user']
-    if not _from or not host or not username or not password or not port or not any((to, cc, bcc)) or not any((subject, body, html, attachments)):
-        raise NotImplementedError('Must supply From or Username, Host, Password, Port, any of Subject, Body, HTML, Attachments, and any of TO, CC, BCC!')
-    m = EmailMessage()
-    m['Subject'] = subject
-    m['From'] = _from
-    if to:
-        m['To'] = ','.join(to) if not isinstance(to, str) else to
-    if cc:
-        m['CC'] = ','.join(cc) if not isinstance(cc, str) else cc
-    if bcc:
-        m['BCC'] = ','.join(bcc) if not isinstance(bcc, str) else bcc
-    if reply_to:
-        m['Reply-To'] = ','.join(reply_to) if not isinstance(reply_to, str) else reply_to
-    m.set_content(body)
-    cids = []
-    if embed_files and html:
-        for file in (extra_embed or []) + re.findall(r'(?:href="|src=")([\w/._-]+\.\w+)"', html):
-            cid = make_msgid()
-            html.replace(file, f'cid:{cid[1:-1]}')
-            ctype, encoding = mimetypes.guess_type(file)
-            if ctype is None or encoding is not None:
-                ctype = 'application/octet-stream'
-            maintype, subtype = ctype.split('/', 1)
-            with open(file, 'rb') as fp:
-                cids.append((fp.read(), maintype, subtype, cid))
-    if html:
-        m.add_alternative(html, subtype='html')
-        for cid in cids:
-            m.get_payload()[1].add_related(cid[0], cid[1], cid[2], cid=cid[3])
-    if attachments:
-        for f in (list(attachments) if not isinstance(attachments, str) else [attachments]):
+    def attach(self, *attachments: str):
+        for f in attachments:
             if exists(f):
                 ctype, encoding = mimetypes.guess_type(f)
                 if ctype is None or encoding is not None:
                     ctype = 'application/octet-stream'
                 maintype, subtype = ctype.split('/', 1)
                 with open(f, 'rb') as fp:
-                    m.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=f)
+                    self.message.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=f)
+        return Email
 
-    def send():
-        with (SMTP_SSL if ssl else SMTP)(host, port, **({'timeout': timeout} if timeout else {})) as s:
-            if tls and not ssl:
-                s.starttls()
-            s.login(username, password)
-            s.send_message(m)
-
-    if in_thread:
-        Thread(target=send).start()
-    else:
-        send()
+    def send(self, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, tls: bool = True, ssl: bool = False, timeout: Optional[int] = None, wait: bool = False):
+        """actually send the email. uses values from defualt_email if none specified"""
+        def _send():
+            with (SMTP_SSL if ssl else SMTP)(host, port, **({'timeout': timeout} if timeout else {})) as s:
+                if tls and not ssl:
+                    s.starttls()
+                s.login(username, password)
+                s.send_message(self.message)
+            if not wait:
+                Thread(target=_send).start()
+            else:
+                _send()
 
 
 def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, f: Callable = None):
@@ -654,7 +644,7 @@ def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: 
             url = (url or '') + '/'
         if route_name is None:
             route_name = url
-        if route_name not in URLS:
+        if route_name not in App._urls:
             func.url = url
             func.re = re.compile(url)
             func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.split(','))
@@ -662,7 +652,7 @@ def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: 
             func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
             func.route_name = route_name
             func.cache = []
-            URLS[route_name] = func
+            App._urls[route_name] = func
         return partial(func)
 
     if f:
@@ -678,37 +668,61 @@ def compress_string(s: str) -> bytes:
     return zbuf.getvalue()
 
 
-def app(env: dict, start_response: Callable) -> List[bytes]:
+class App:
     """Handles request from client"""
-    path = env['PATH_INFO']
-    if path[-1:] != '/' and '.' not in path[-5:]:  # auto rediects to url that ends in / if there is no . in the end of the url (marks it as a file)
-        start_response('307 Moved Permanently', [('Location', f'{path}/')])
-        return [b'']
-    if path not in __ROUTE_CACHE:  # finds url from urls and adds to ROUTE_CACHE to prevent future lookups
-        for _, url in URLS.items():
-            m = url.re.fullmatch(path[1:]) if path and path[0] == '/' and url.re.pattern[0] != '/' else url.re.fullmatch(path)
-            if m:
-                groups = m.groups()
-                for key, value in m.groupdict().items():
-                    if value in groups:
-                        groups = (g for g in groups if g != value)
-                __ROUTE_CACHE[path] = (url, groups, m.groupdict())
-                url.cache.append(path)
-                break
-        else:
+    __route_cache = {}
+    _urls = {}
+    _status = {s.value: f'{s.value} {s.phrase}' for s in HTTPStatus}
+    debug = False
+
+    def __call__(self, env: dict, start_response: Callable):
+        path = env['PATH_INFO']
+        if path[-1:] != '/' and '.' not in path[-5:]:  # auto rediects to url that ends in / if there is no . in the end of the url (marks it as a file)
+            start_response('307 Moved Permanently', [('Location', f'{path}/')])
+            return [b'']
+        f = self._handle_route_cache(path)
+        if isinstance(f, bool):
             start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
             return [b'']
-    f = __ROUTE_CACHE[path]
-    if '*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods:  # checks for allowed methods
-        start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
-        return [b'']
-    headers = {}
-    methods = f[0].cors_methods or CORS_METHODS_ALLOW
-    if methods:  # checks for cors allowed methods using route override of global
-        if '*' in methods:
-            headers['Access-Control-Allow-Method'] = '*'
-        elif env['REQUEST_METHOD'].lower() in methods:
-            headers['Access-Control-Allow-Method'] = env['REQUEST_METHOD']
+        if '*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods:  # checks for allowed methods
+            start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
+            return [b'']
+        headers = {}
+        r = self._handle_cors(f, headers, env)
+        if isinstance(r, tuple):
+            start_response(*r[1:])
+            return r[0]
+        env = Request(env)
+        cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
+        try:
+            result = f[0](env, *f[1], **f[2])
+        except Exception:
+            e = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
+            if ADMINS and not App.debug:
+                Email(f'Internal Server Error: {env["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=e[0].decode()).send()
+            result = e if App.debug else ('', 500)
+        r = self._handle_result(result, headers, cookie, env)
+        start_response(*r[1:])
+        return r[0]
+
+    def _handle_route_cache(self, path: str):
+        if path not in self.__route_cache:  # finds url from urls and adds to ROUTE_CACHE to prevent future lookups
+            for _, url in self._urls.items():
+                m = url.re.fullmatch(path[1:]) if path and path[0] == '/' and url.re.pattern[0] != '/' else url.re.fullmatch(path)
+                if m:
+                    groups = m.groups()
+                    for key, value in m.groupdict().items():
+                        if value in groups:
+                            groups = (g for g in groups if g != value)
+                    self.__route_cache[path] = (url, groups, m.groupdict())
+                    url.cache.append(path)
+                    break
+            else:
+                return False
+        return self.__route_cache[path]
+
+    def _handle_cors(self, f: Callable, headers: dict, env: dict):
+        def _check_cors():
             cors = f[0].cors or CORES_ORIGIN_ALLOW  # checks for cors allowed dowmains using route override of global
             if cors:
                 if '*' in cors:
@@ -716,89 +730,79 @@ def app(env: dict, start_response: Callable) -> List[bytes]:
                 elif env.get('ORIGIN', '').lower() in cors:
                     headers['Access-Control-Allow-Origin'] = env['ORIGIN']
                 else:
-                    start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
-                    return [b'']
-        else:
-            start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
-            return [b'']
-    else:
-        cors = f[0].cors or CORES_ORIGIN_ALLOW  # checks for cors allowed dowmains using route override of global
-        if cors:
-            if '*' in cors:
-                headers['Access-Control-Allow-Origin'] = '*'
-            elif env.get('ORIGIN', '').lower() in cors:
-                headers['Access-Control-Allow-Origin'] = env['ORIGIN']
-            else:
-                start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
-                return [b'']
-    env = Request(env)
-    cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
-    try:
-        result = f[0](env, *f[1], **f[2])
-    except Exception:
-        e = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
-        if ADMINS and not DEBUG:
-            send_email(f'Internal Server Error: {env["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), ADMINS, html=e[0].decode())
-        result = e if DEBUG else ('', 500)
-    body = ''
-    status = '200 OK'
-    if result:  # if result is not None parse for body, status, headers
-        def process_headers(request_headers):
-            if isinstance(request_headers, dict):
-                headers.update(request_headers)
-            elif isinstance(request_headers, tuple):
-                headers.update(dict(request_headers))
-            elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
-                headers.update(dict(result))
+                    return [b''], '405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')]
 
-        if isinstance(result, (tuple, type(namedtuple), list)):
-            l_result = len(result)
-            body = result[0] if l_result <= 3 else result
-            if 3 >= l_result > 1:
-                if not result[1]:
-                    status = STATUS[200]
-                else:
-                    status = STATUS[result[1]] if isinstance(result[1], int) else result[1] if not isinstance(result[1], HTTPStatus) else f'{result[1].value} {result[1].phrase}'
-                if l_result > 2 and result[2]:
-                    process_headers(result[2])
-            if callable(body):
-                body = body()
-            elif isinstance(body, dict):
-                body = json.dumps(body, default=json_serial).encode()
-                headers['Content-Type'] = 'application/json; charset=utf-8'
-        elif isinstance(result, dict):
-            if 'body' in result:
-                body = result['body']
+        methods = f[0].cors_methods or CORS_METHODS_ALLOW
+        if methods:  # checks for cors allowed methods using route override of global
+            if '*' in methods:
+                headers['Access-Control-Allow-Method'] = '*'
+            elif env['REQUEST_METHOD'].lower() in methods:
+                headers['Access-Control-Allow-Method'] = env['REQUEST_METHOD']
+                return _check_cors()
+            else:
+                return [b''], '405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')]
+        else:
+            return _check_cors()
+
+    def _handle_result(self, result, headers: dict, cookie: set, env: Request):
+        body = ''
+        status = '200 OK'
+        if result:  # if result is not None parse for body, _status, headers
+            def process_headers(request_headers):
+                if isinstance(request_headers, dict):
+                    headers.update(request_headers)
+                elif isinstance(request_headers, tuple):
+                    headers.update(dict(request_headers))
+                elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
+                    headers.update(dict(result))
+
+            if isinstance(result, (tuple, type(namedtuple), list)):
+                l_result = len(result)
+                body = result[0] if l_result <= 3 else result
+                if 3 >= l_result > 1:
+                    if not result[1]:
+                        status = self._status[200]
+                    else:
+                        status = self._status[result[1]] if isinstance(result[1], int) else result[1] if not isinstance(result[1], HTTPStatus) else f'{result[1].value} {result[1].phrase}'
+                    if l_result > 2 and result[2]:
+                        process_headers(result[2])
                 if callable(body):
                     body = body()
-            if 'status' in result:
-                status = STATUS[result['status']] if isinstance(result['status'], int) else result['status'] if not isinstance(result['status'], HTTPStatus) else f'{result["status"].value} {result["status"].phrase}'
-            if 'headers' in result:
-                process_headers(result['headers'])
-            if not (body or status != '200 OK'):
-                body = json.dumps(result, default=json_serial).encode()
-                headers['Content-Type'] = 'application/json; charset=utf-8'
-        elif isinstance(result, (str, bytes)):
-            body = result
-    if 'Content-Type' not in headers:  # add default html header if none passed
-        headers['Content-Type'] = 'text/html; charset=utf-8'
-    body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else [str(body).encode()] if isinstance(body, int) else body
-    if body:
-        body_len = len(body[0])
-        if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and body_len > 200 and 'image' not in headers.get('Content-Type', '').lower():
-            compressed_body = compress_string(body[0])
-            compressed_len = len(compressed_body)
-            if compressed_len < body_len:
-                body = [compressed_body]
-            headers['Content-Length'] = str(compressed_len)
-            headers['Content-Encoding'] = 'gzip'
-    start_response(status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie])
-    return body
+                elif isinstance(body, dict):
+                    body = json.dumps(body, default=json_serial).encode()
+                    headers['Content-Type'] = 'application/json; charset=utf-8'
+            elif isinstance(result, dict):
+                if 'body' in result:
+                    body = result['body']
+                    if callable(body):
+                        body = body()
+                if '_status' in result:
+                    status = self._status[result['_status']] if isinstance(result['_status'], int) else result['_status'] if not isinstance(result['_status'], HTTPStatus) else f'{result["_status"].value} {result["_status"].phrase}'
+                if 'headers' in result:
+                    process_headers(result['headers'])
+                if not (body or status != '200 OK'):
+                    body = json.dumps(result, default=json_serial).encode()
+                    headers['Content-Type'] = 'application/json; charset=utf-8'
+            elif isinstance(result, (str, bytes)):
+                body = result
+        if 'Content-Type' not in headers:  # add default html header if none passed
+            headers['Content-Type'] = 'text/html; charset=utf-8'
+        body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else [str(body).encode()] if isinstance(body, int) else body
+        if body:
+            body_len = len(body[0])
+            if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and body_len > 200 and 'image' not in headers.get('Content-Type', '').lower():
+                compressed_body = compress_string(body[0])
+                compressed_len = len(compressed_body)
+                if compressed_len < body_len:
+                    body = [compressed_body]
+                headers['Content-Length'] = str(compressed_len)
+                headers['Content-Encoding'] = 'gzip'
+        return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 
 
 def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = None, status_override: int = None) -> Tuple[bytes, int, Dict[str, str]]:
     """Send a file to the client.
-    Allows for cache and header specification. Also allows to return a different status code than 200
+    Allows for cache and header specification. Also allows to return a different _status code than 200
     :returns:Tuple[bytes, int, Dict[str, str]]"""
     file = file.replace('../', '')  # prevent serving files outside of current / specified dir (prevents download of all system files)
     if headers is None:
@@ -814,7 +818,7 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
         headers['Content-Type'] = ctype
     if cache_age > 0:
         headers['Cache-Control'] = f'max-age={cache_age}'
-    elif not cache_age and file.split('.')[-1] != 'html' and not DEBUG:  # if cache_age is not specified and not an html file and not debug then autoset cache_age to 1 hour
+    elif not cache_age and file.split('.')[-1] != 'html' and not App.debug:  # if cache_age is not specified and not an html file and not debug then autoset cache_age to 1 hour
         headers['Cache-Control'] = 'max-age=3600'
     return lines, status_override or 200, headers
 
@@ -848,46 +852,48 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
             for file in re.findall(r'~~includes ([\w\s./\\-]+)~~', lines):
                 if exists(file):
                     with open(file) as _in:
-                        lines = lines.replace(f'~~includes {file}~~', _in.read())
+                        lines = lines.replace(f'~~includes {file}~~', _in.read(), 1)
             for key, value in data.items():
-                if isinstance(value, str):
-                    lines = lines.replace(f'~~{key}~~', value)
+                lines = lines.replace(f'~~{key}~~', str(value))
             for match in re.findall(r'(<?~~([^~]+)~~>?)', lines):
                 if match[1][0] == '<':
                     continue
                 try:
                     lines = lines.replace(match[0], str(eval(match[1], {'request': request, 'data': data})))
                 except Exception as e:
-                    if DEBUG:
+                    if App.debug:
                         print(files, match[1], e.__repr__(), locals().keys(), sep='\t')
         lines = re.sub(r'<?/?~~[^~]+~~>?', '', lines).encode()
     return lines, status_override or status, headers
 
 
-def start_server(application=app, bind: str = '0.0.0.0', port: int = 8000, cors_allow_origin: Union[Iterable, str] = None, cors_methods: Union[Iterable, str] = None, cookie_max_age: int = 7 * 24 * 3600, handler=RequestHandler, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, default_email: Optional[str] = None, default_email_username: Optional[str] = None, default_email_password: Optional[str] = None, default_email_host: Optional[str] = None, default_email_port: Optional[int] = None) -> WebServer:
-    global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, FAVICON, COOKIE_AGE, AUTORELOAD, RELOAD_EXTRA_FILES, DEBUG, ADMINS
+def start_server(application=App, bind: str = '0.0.0.0', port: int = 8000, cors_allow_origin: Union[Iterable, str] = None, cors_methods: Union[Iterable, str] = None, cookie_max_age: int = 7 * 24 * 3600, handler=RequestHandler, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, default_email: Optional[str] = None, default_email_username: Optional[str] = None, default_email_password: Optional[str] = None, default_email_host: Optional[str] = None, default_email_port: Optional[int] = None, default_email_tls: Optional[bool] = None, default_email_ssl: Optional[bool] = None, default_email_timeout: Optional[int] = None) -> WebServer:
+    global CORES_ORIGIN_ALLOW, CORS_METHODS_ALLOW, COOKIE_AGE, ADMINS
     server = WebServer((bind, port), handler)
-    server.application = application
+    application.debug = debug
+    server.application = application()
     CORES_ORIGIN_ALLOW = {c.lower() for c in cors_allow_origin} if isinstance(cors_allow_origin, (list, set, dict, tuple)) else {c for c in cors_allow_origin.lower().strip().split(',') if c} if cors_allow_origin else set()
     CORS_METHODS_ALLOW = {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c} if cors_methods else set()
-    DEBUG = debug
     ADMINS = admins or []
     COOKIE_AGE = cookie_max_age
-    DEFAULT_EMAIL['from'] = default_email or ''
-    DEFAULT_EMAIL['user'] = default_email_username or ''
-    DEFAULT_EMAIL['password'] = default_email_password or ''
-    DEFAULT_EMAIL['host'] = default_email_host or ''
-    DEFAULT_EMAIL['port'] = default_email_port or 25
-    if DEFAULT_EMAIL['from'] and not DEFAULT_EMAIL['user']:
-        DEFAULT_EMAIL['user'] = DEFAULT_EMAIL['from']
-    elif not DEFAULT_EMAIL['from'] and DEFAULT_EMAIL['user']:
-        DEFAULT_EMAIL['from'] = DEFAULT_EMAIL['user']
+    Email.default_email['from'] = default_email or ''
+    Email.default_email['user'] = default_email_username or ''
+    Email.default_email['password'] = default_email_password or ''
+    Email.default_email['host'] = default_email_host or ''
+    Email.default_email['port'] = default_email_port or 25
+    Email.default_email['tls'] = default_email_tls or True
+    Email.default_email['ssl'] = default_email_ssl or False
+    Email.default_email['timeout'] = default_email_timeout or 0
+    if Email.default_email['from'] and not Email.default_email['user']:
+        Email.default_email['user'] = Email.default_email['from']
+    elif not Email.default_email['from'] and Email.default_email['user']:
+        Email.default_email['from'] = Email.default_email['user']
     if serve:
         server.serve()
     return server
 
 
-def start_with_args(app=app, bind_default: str = '0.0.0.0', port_default: int = 8000, cors_allow_origin: str = '', cors_methods: str = '', cookie_max_age: int = 7 * 24 * 3600, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, from_email: Optional[str] = None, from_user: Optional[str] = None, from_password: Optional[str] = None, from_host: Optional[str] = None, from_port: Optional[int] = None) -> WebServer:
+def start_with_args(app=App, bind_default: str = '0.0.0.0', port_default: int = 8000, cors_allow_origin: str = '', cors_methods: str = '', cookie_max_age: int = 7 * 24 * 3600, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, from_email: Optional[str] = None, from_user: Optional[str] = None, from_password: Optional[str] = None, from_host: Optional[str] = None, from_port: Optional[int] = None, from_tls: Optional[bool] = None, from_ssl: Optional[bool] = None, from_timeout: Optional[int] = None) -> WebServer:
     """Allows you to specify a lot of parameters for start_server"""
     parser = ArgumentParser()
     parser.add_argument('-b', '--bind', default=bind_default)
@@ -902,6 +908,9 @@ def start_with_args(app=app, bind_default: str = '0.0.0.0', port_default: int = 
     parser.add_argument('--default_email_password', default=from_password)
     parser.add_argument('--default_email_host', default=from_host)
     parser.add_argument('--default_email_port', default=from_port, type=int)
+    parser.add_argument('--default_email_tls', default=from_tls, action='store_true')
+    parser.add_argument('--default_email_ssl', default=from_ssl, action='store_true')
+    parser.add_argument('--default_email_timeout', default=from_timeout, type=int)
     return start_server(app, **parser.parse_args().__dict__, serve=serve)
 
 

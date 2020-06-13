@@ -1,7 +1,7 @@
 try:
-    from .server import Request, route, serve, start_with_args, URLS, render
+    from .server import Request, route, serve, start_with_args, App, render
 except ImportError:
-    from server import Request, route, serve, start_with_args, URLS, render
+    from server import Request, route, serve, start_with_args, App, render
 
 """Any function with a route decorator must follow one of the following return patterns:
 render(filename, dict)
@@ -38,12 +38,12 @@ def test2(request, num):
 
 @route()  # uses method name to generate url but because it is index: /
 def index(request):
-    return [f'<a href="{func.url}">{name}</a><br>' for name, func in URLS.items()]  # return list of urls which gets joined and sent to client
+    return [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()]  # return list of urls which gets joined and sent to client
 
 
 @route()  # uses method name to generate url: /index2/
 def index2(request):  # for use when len(urls) <= 3
-    return [f'<a href="{func.url}">{name}</a><br>' for name, func in URLS.items()], 200  # return list of urls which gets joined and sent to client with status 200
+    return [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()], 200  # return list of urls which gets joined and sent to client with status 200
 
 
 @route(r'(?P<year>\d{4})/(?P<article>\d+)')  # use regex named groups to generate url: /[any 4 digit number]/[any number]/

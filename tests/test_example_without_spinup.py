@@ -2,8 +2,10 @@ import mimetypes
 from http.cookies import SimpleCookie
 from typing import Iterable
 
-from example import URLS
-from server import app, STATUS
+try:
+    from example import App
+except ImportError:
+    from webserver.example import App
 
 
 def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: Iterable[bytes], expected_headers: dict = None, skip_405: bool = False, method_params: dict = None):
@@ -15,17 +17,17 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
         method_params = {}
     if url[-1:] == '/':
         data = {}
-        result = app({'PATH_INFO': url[:-1], 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET', 'GET': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
+        result = App()({'PATH_INFO': url[:-1], 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET', 'GET': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         assert result[0] == b''
         assert data['status'] == '307 Moved Permanently'
         assert data['headers']['Location'] == url
     allowed_methods = {method.upper() for method in allowed_methods}
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
         data = {}
-        result = app({'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method, method: method_params}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
+        result = App()({'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method, method: method_params}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         if method in allowed_methods or '*' in allowed_methods:
             assert result == expected_result
-            assert data['status'] == STATUS[expected_status]
+            assert data['status'] == App._status[expected_status]
             for header, value in expected_headers.items():
                 assert data['headers'][header] == value
         elif not skip_405:
@@ -51,26 +53,26 @@ def test_json():
 
 
 def test_test2():
-    url_test(f'0', ('*',), 404, [b''])
+    url_test('0', ('*',), 404, [b''])
     for i in range(10, 100):
         url_test(f'{i}', ('*',), 200, [f'Test2 [{i}]'.encode()])
-    url_test(f'123', ('*',), 404, [b''])
+    url_test('123', ('*',), 404, [b''])
     url_test('/num/1234488/', ('*',), 200, [b'Test2 [1234488]'])
 
 
 def test_index():
-    url_test('/example/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in URLS.items()])
+    url_test('/example/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
 
 
 def test_index2():
-    url_test('/example/index2/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in URLS.items()])
+    url_test('/example/index2/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
 
 
 def test_article():
-    url_test(f'10/12', ('*',), 404, [b''])
+    url_test('10/12', ('*',), 404, [b''])
     for i in range(1000, 10000):
         url_test(f'{i}/1', ('*',), 200, [f'This is article 1 from year {i}'.encode()])
-    url_test(f'12341/123', ('*',), 404, [b''])
+    url_test('12341/123', ('*',), 404, [b''])
 
 
 def test_readme():

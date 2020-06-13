@@ -161,6 +161,7 @@ class ExceptionReporter:
     def get_traceback_frames(self) -> List[Dict[str, Any]]:
         """Returns a list of the traceback frames
         :returns:List[Dict[str, Any]]"""
+
         def explicit_or_implicit_cause(exc_value):
             """Return the cause of the exception. Returns the implicit if explicit does not exist."""
             return getattr(exc_value, '__cause__', None) or getattr(exc_value, '__context__', None)
@@ -358,7 +359,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.valid_client = False
         super().__init__(request, client_address, server)
         self.raw_requestline, self.requestline, self.request_version, self.command = '', '', '', ''
-        
+
     @staticmethod
     def _get_boundary_enclosed(boundary: List[str], env: Request):
         boundary = boundary[0] + '--'
@@ -406,7 +407,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             if not content:
                 line = decoded
             i += 1
-            
+
     @staticmethod
     def _decode_form_urlencoded(data: str, method: str, env: Request):
         for q in data:
@@ -557,8 +558,8 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         sys.stderr.write(f"{self.address_string()} - [{datetime.now().strftime('%m/%d/%Y %H:%M:%S')}] {format % args}\n")
-        
-        
+
+
 class Email:
     """Wrapper around EmailMessage. Handles attachments, embeds, send later in another thread, tls, ssl."""
     default_email = {
@@ -571,7 +572,7 @@ class Email:
         'tls': True,
         'timeout': 0
     }
-    
+
     def __init__(self, subject: str, body: str, to: Optional[Union[str, Iterable[str]]] = None, _from: Optional[str] = None, reply_to: Optional[str] = None, cc: Optional[Union[str, Iterable[str]]] = None, bcc: Optional[Union[str, Iterable[str]]] = None, html: Optional[str] = None):
         if not _from:
             _from = Email.default_email['from']
@@ -622,6 +623,7 @@ class Email:
 
     def send(self, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, tls: bool = True, ssl: bool = False, timeout: Optional[int] = None, wait: bool = False):
         """actually send the email. uses values from defualt_email if none specified"""
+
         def _send():
             with (SMTP_SSL if ssl else SMTP)(host, port, **({'timeout': timeout} if timeout else {})) as s:
                 if tls and not ssl:
@@ -636,6 +638,7 @@ class Email:
 
 def route(url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, f: Callable = None):
     """Handles adding function to urls"""
+
     def decorated(func) -> partial:
         nonlocal url, route_name
         if url is None:
@@ -918,5 +921,7 @@ if __name__ == '__main__':  # example index page (does not have to be in __name_
     @route()
     def index(request):
         return [b'Not Implemented']
+
+
     # routes must be declared before start_server or start_with_args because start_server will block until shutdown
     start_with_args()

@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 from _pydecimal import Decimal
@@ -71,7 +72,7 @@ class ExceptionReporter:
         """Return HTML version of debug 500 HTTP error page.
         :returns:Tuple[bytes, int, Dict[str, str]]"""
         from litespeed.helpers import render
-        return render(self.request, 'litespeed/html/500.html', self.get_traceback_data(), status_override=500)
+        return render(self.request, f'{os.sep.join(__file__.split(os.sep)[:-1])}/html/500.html', self.get_traceback_data(), status_override=500)
 
     @staticmethod
     def force_text(s, encoding: str = 'utf-8', strings_only: bool = False, errors: str = 'strict'):

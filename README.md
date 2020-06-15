@@ -1,6 +1,6 @@
-master: ![Lint and Test: master](https://github.com/falconraptor/webserver/workflows/Lint%20and%20Test/badge.svg?branch=master)
+master: ![Lint and Test: master](https://github.com/falconraptor/LiteSpeed/workflows/Lint%20and%20Test/badge.svg?branch=master)
 
-dev: ![Lint and Test: dev](https://github.com/falconraptor/webserver/workflows/Lint%20and%20Test/badge.svg?branch=dev)
+dev: ![Lint and Test: dev](https://github.com/falconraptor/LiteSpeed/workflows/Lint%20and%20Test/badge.svg?branch=dev)
 
 # Webserver
 
@@ -11,11 +11,7 @@ Has a built in rendering system using the render method. A complicated example o
 
 ## Installation
 
-1. make sure your project is git
-2. run `git submodule add htts://github.com/falconraptor/webserver`
-
-OR
-1. clone this project 
+`pip install LiteSpeed`
 
 ## Usage
 

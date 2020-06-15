@@ -1,3 +1,7 @@
 .idea
 *.pyc
 .pytest_cache/
+dist/
+junit/
+LiteSpeed.egg-info/
+build/

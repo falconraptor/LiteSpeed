@@ -2,10 +2,7 @@ import mimetypes
 from http.cookies import SimpleCookie
 from typing import Iterable
 
-try:
-    from example import App
-except ImportError:
-    from webserver.example import App
+from litespeed.example import App
 
 
 def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: Iterable[bytes], expected_headers: dict = None, skip_405: bool = False, method_params: dict = None):

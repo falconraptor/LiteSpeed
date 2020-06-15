@@ -1,7 +1,5 @@
-try:
-    from .server import Request, route, serve, start_with_args, App, render
-except ImportError:
-    from server import Request, route, serve, start_with_args, App, render
+from litespeed import App, render, route, serve, start_with_args
+from litespeed.utils import Request
 
 """Any function with a route decorator must follow one of the following return patterns:
 render(filename, dict)
@@ -53,7 +51,7 @@ def article(request, article, year):
 
 @route()
 def readme(request):
-    return serve('README.md')  # serve a file
+    return serve('../README.md')  # serve a file
 
 
 @route(r'([\w.]+)')
@@ -63,7 +61,7 @@ def file(request, file):
 
 @route(cors_methods=['get'], cors='*')  # set cors (cross origin) to allow from any domain if its a get request
 def render_example(request):
-    return render(request, 'README.md', {'test': request.GET.get('test', '')})  # replace ~~test~~ in the readme file with what is in the get request for the variable test
+    return render(request, '../README.md', {'test': request.GET.get('test', '')})  # replace ~~test~~ in the readme file with what is in the get request for the variable test
 
 
 def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____"

@@ -74,7 +74,7 @@ def test_article():
 
 def test_readme():
     with open('README.md', 'rb') as readme:
-        url_test('/example/readme/', ('*',), 200, [readme.read()], {'Content-Type': 'application/octet-stream'})
+        url_test('/example/readme/', ('*',), 200, [readme.read()], {'Content-Type': mimetypes.guess_type('README.md')[0] or 'application/octet-stream'})
 
 
 def test_file():

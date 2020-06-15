@@ -2,7 +2,7 @@ import mimetypes
 from http.cookies import SimpleCookie
 from typing import Iterable
 
-from litespeed.example import App
+from example import App
 
 
 def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: Iterable[bytes], expected_headers: dict = None, skip_405: bool = False, method_params: dict = None):
@@ -74,12 +74,12 @@ def test_article():
 
 def test_readme():
     with open('README.md', 'rb') as readme:
-        url_test('/example/readme/', ('*',), 200, [readme.read()], {'Content-Type': mimetypes.guess_type('README.md')[0]})
+        url_test('/example/readme/', ('*',), 200, [readme.read()], {'Content-Type': 'application/octet-stream'})
 
 
 def test_file():
-    with open('server.py', 'rb') as file:
-        url_test('server.py', ('*',), 200, [file.read()], {'Content-Type': 'text/x-python'})
+    with open('setup.py', 'rb') as file:
+        url_test('setup.py', ('*',), 200, [file.read()], {'Content-Type': mimetypes.guess_type('setup.py')[0]})
 
 
 def test_render():

@@ -2,7 +2,7 @@ master: ![Lint and Test: master](https://github.com/falconraptor/LiteSpeed/workf
 
 dev: ![Lint and Test: dev](https://github.com/falconraptor/LiteSpeed/workflows/Lint%20and%20Test/badge.svg?branch=dev)
 
-# Webserver
+# LiteSpeed
 
 Just a simple-fast-multithreading webserver that is mostly customizable and only relies on pure python 3.6+.
 Has support for Cookies, Sessions, Websockets and serving files. It is similar to flask.

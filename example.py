@@ -1,4 +1,4 @@
-from litespeed import App, render, route, serve, start_with_args
+from litespeed import App, render, route, serve, start_with_args, start_server
 from litespeed.utils import Request
 
 """Any function with a route decorator must follow one of the following return patterns:

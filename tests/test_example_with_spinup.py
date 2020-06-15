@@ -89,7 +89,7 @@ def test_json(server):
 
 def test_test2(server):
     url_test('0', ('*',), 404, b'', port=server)
-    i = randint(10, 100)
+    i = randint(10, 99)
     url_test(f'{i}', ('*',), 200, f'Test2 [{i}]'.encode(), port=server)
     url_test('123', ('*',), 404, b'', port=server)
     url_test('/num/1234488/', ('*',), 200, b'Test2 [1234488]', port=server)

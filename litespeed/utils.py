@@ -32,12 +32,12 @@ class ExceptionReporter:
                             if len(v) > 1000:
                                 v = f'Length: {len(v)}'
                             else:
-                                v = json.dumps({k: _ for k, _ in v.items() if not isinstance(_, Request)}, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
+                                v = json.dumps(v, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
                         elif isinstance(v, Iterable) and not isinstance(v, str):
                             if hasattr(v, '__len__') and len(v) > 1000:
                                 v = f'Length: {len(v)}'
                             else:
-                                v = json.dumps([_ for _ in v if not isinstance(_, Request)], indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
+                                v = json.dumps(v, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
                         else:
                             v = repr(v)
                     except Exception as e:

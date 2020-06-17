@@ -57,7 +57,7 @@ class App:
         except Exception:
             e = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
             if self._admins and not self.debug:
-                Mail(f'Internal Server Error: {env["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), self._admins, html=e[0].decode()).send()
+                Mail(f'Internal Server Error: {env["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), self._admins, html=e[0].decode()).embed().send()
             result = e if self.debug else ('', 500)
         r = self._handle_result(result, headers, cookie, env)
         start_response(*r[1:])
@@ -434,7 +434,7 @@ class ServerHandler(SimpleHandler):
             environ = Request(environ)
         er = ExceptionReporter(environ, *sys.exc_info()).get_traceback_html()[0]
         if App._admins and not App.debug and Mail.default_email['host']:
-            Mail(f'Internal Server Error: {environ.get("PATH_INFO", "???")}', '\n'.join(str(e) for e in sys.exc_info()), App._admins, html=er.decode()).send()
+            Mail(f'Internal Server Error: {environ.get("PATH_INFO", "???")}', '\n'.join(str(e) for e in sys.exc_info()), App._admins, html=er.decode()).embed().send()
         start_response(self.error_status, self.error_headers[:] if not App.debug else [('Content-Type', 'text/html')], sys.exc_info())
         return [er] if App.debug else [self.error_body]
 

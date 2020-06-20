@@ -6,6 +6,7 @@ from os.path import exists
 from smtplib import SMTP, SMTP_SSL
 from threading import Thread
 from typing import Iterable, List, Optional, Union
+from urllib.request import urlopen
 
 
 class Mail:
@@ -41,17 +42,24 @@ class Mail:
     def embed(self, extra_embed: Optional[List[str]] = None, embed_files: bool = True):
         cids = []
         if embed_files and self.html:
-            for file in (extra_embed or []) + re.findall(r'(?:href="|src=")([\w/._-]+\.\w+)"', self.html):
+            for file in (extra_embed or []) + re.findall(r'<(?:link|script|img)[\w\"\s=]*(?:href|src)=\"([\w/._:-]+)\"', self.html):
+                type = 'local'
+                if file.startswith('http') or file.startswith('//'):
+                    type = 'remote'
                 cid = make_msgid()
                 self.html = self.html.replace(file, f'cid:{cid[1:-1]}')
                 ctype, encoding = mimetypes.guess_type(file)
                 if ctype is None or encoding is not None:
                     ctype = 'application/octet-stream'
                 maintype, subtype = ctype.split('/', 1)
-                with open(file, 'rb') as fp:
-                    cids.append((fp.read(), maintype, subtype, cid))
+                if type == 'local':
+                    with open(file, 'rb') as fp:
+                        cids.append((fp.read(), maintype, subtype, cid))
+                else:
+                    with urlopen(file) as fp:
+                        cids.append((fp.read(), maintype, subtype, cid))
         if self.html:
-            self.message.add_alternative(self.html, subtype='html')
+            self.message.get_payload()[1].set_payload(self.html)
             for cid in cids:
                 self.message.get_payload()[1].add_related(cid[0], cid[1], cid[2], cid=cid[3])
         return self
@@ -85,6 +93,9 @@ class Mail:
                 s.login(username, password)
                 s.send_message(self.message)
 
+        if not self.message['From']:
+            del self.message['From']
+            self.message['From'] = username
         if not wait:
             Thread(target=_send).start()
         else:

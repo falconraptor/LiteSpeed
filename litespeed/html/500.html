@@ -22,7 +22,7 @@
                             </tr>
                             <tr>
                                 <th>Request URI:</th>
-                                <td><a href="http://~~request.get('HOST', '') + request.get('PATH_INFO', '') + request.get('QUERY_STRING', '')~~">http://~~request.get('HOST', '') + request.get('PATH_INFO', '') + request.get('QUERY_STRING', '')~~</a></td>
+                                <td><a href="http://~~request.get('HOST', '') + request.get('PATH_INFO', '') + ('?' + request.get('QUERY_STRING', '') if request.get('QUERY_STRING', '') else '')~~">http://~~request.get('HOST', '') + request.get('PATH_INFO', '') + ('?' + request.get('QUERY_STRING', '') if request.get('QUERY_STRING', '') else '')~~</a></td>
                             </tr>
                             ~~f'<tr><th>Exception Location</th><td>{data["lastframe"]["filename"]} in {data["lastframe"]["function"]}, line {data["lastframe"]["lineno"]}</td></tr>' if data['lastframe'] else ''~~
                             <tr>

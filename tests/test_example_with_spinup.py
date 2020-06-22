@@ -8,7 +8,7 @@ from typing import Iterable
 import pytest
 import requests
 
-import example
+from examples import example
 from litespeed import App
 
 
@@ -18,24 +18,21 @@ def server():
 
 
 def _server():
-    port = find_free_port()
-    s = example.start_server(serve=False, port=port)
-    t = Thread(target=s.serve_forever, daemon=True)
-    t.start()
-    while True:
-        try:
-            requests.get(f'http://localhost:{port}')
-            break
-        except ConnectionError:
-            pass
-    return port
-
-
-def find_free_port():
-    with closing(_socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)) as s:
-        s.bind(('', 0))
-        s.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-        return s.getsockname()[1]
+    if not hasattr(_server, 'port'):
+        with closing(_socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)) as s:
+            s.bind(('', 0))
+            s.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+            _server.port = s.getsockname()[1]
+        s = example.start_server(serve=False, port=_server.port)
+        t = Thread(target=s.serve_forever, daemon=True)
+        t.start()
+        while True:
+            try:
+                requests.get(f'http://localhost:{_server.port}', timeout=.01)
+                break
+            except ConnectionError:
+                pass
+    return _server.port
 
 
 def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: bytes, expected_headers: dict = None, skip_405: bool = False, method_params: dict = None, port: int = 8000):
@@ -64,7 +61,7 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
 
 
 def test_test(server):
-    url_test('/example/test/', ('*',), 200, b'Testing', port=server)
+    url_test('/examples/example/test/', ('*',), 200, b'Testing', port=server)
 
 
 def test_other(server):
@@ -76,7 +73,7 @@ def test_another(server):
 
 
 def test_json(server):
-    url = '/example/json/'
+    url = '/examples/example/json/'
     result = requests.get(f'http://localhost:{server}/{url[:-1]}'.replace(f':{server}//', f':{server}/'), allow_redirects=False)
     assert result.content == b''
     assert result.status_code == 307
@@ -96,11 +93,11 @@ def test_test2(server):
 
 
 def test_index(server):
-    url_test('/example/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
+    url_test('/examples/example/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
 
 
 def test_index2(server):
-    url_test('/example/index2/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
+    url_test('/examples/example/index2/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
 
 
 def test_article(server):
@@ -112,7 +109,7 @@ def test_article(server):
 
 def test_readme(server):
     with open('README.md', 'rb') as readme:
-        url_test('/example/readme/', ('*',), 200, readme.read(), {'Content-Type': mimetypes.guess_type('README.md')[0] or 'application/octet-stream'}, port=server)
+        url_test('/examples/example/readme/', ('*',), 200, readme.read(), {'Content-Type': mimetypes.guess_type('README.md')[0] or 'application/octet-stream'}, port=server)
 
 
 def test_file(server):
@@ -122,4 +119,4 @@ def test_file(server):
 
 def test_render(server):
     with open('README.md', 'rt') as readme:
-        url_test('/example/render_example/', ('GET',), 200, readme.read().replace('~~test~~', 'pytest').encode(), method_params={'test': 'pytest'}, port=server)
+        url_test('/examples/example/render_example/', ('GET',), 200, readme.read().replace('~~test~~', 'pytest').encode(), method_params={'test': 'pytest'}, port=server)

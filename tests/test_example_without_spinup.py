@@ -2,7 +2,7 @@ import mimetypes
 from http.cookies import SimpleCookie
 from typing import Iterable
 
-from example import App
+from examples.example import App
 
 
 def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: Iterable[bytes], expected_headers: dict = None, skip_405: bool = False, method_params: dict = None):
@@ -33,7 +33,7 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
 
 
 def test_test():
-    url_test('/example/test/', ('*',), 200, [b'Testing'])
+    url_test('/examples/example/test/', ('*',), 200, [b'Testing'])
 
 
 def test_other():
@@ -46,7 +46,7 @@ def test_another():
 
 def test_json():
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
-        url_test('/example/json/', (method,), 200, [f'{{"PATH_INFO": "/example/json/", "COOKIE": {{}}, "REQUEST_METHOD": "{method}", "{method}": {{}}}}'.encode()], skip_405=True)
+        url_test('/examples/example/json/', (method,), 200, [f'{{"PATH_INFO": "/examples/example/json/", "COOKIE": {{}}, "REQUEST_METHOD": "{method}", "{method}": {{}}}}'.encode()], skip_405=True)
 
 
 def test_test2():
@@ -58,11 +58,11 @@ def test_test2():
 
 
 def test_index():
-    url_test('/example/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
+    url_test('/examples/example/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
 
 
 def test_index2():
-    url_test('/example/index2/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
+    url_test('/examples/example/index2/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
 
 
 def test_article():
@@ -74,7 +74,7 @@ def test_article():
 
 def test_readme():
     with open('README.md', 'rb') as readme:
-        url_test('/example/readme/', ('*',), 200, [readme.read()], {'Content-Type': mimetypes.guess_type('README.md')[0] or 'application/octet-stream'})
+        url_test('/examples/example/readme/', ('*',), 200, [readme.read()], {'Content-Type': mimetypes.guess_type('README.md')[0] or 'application/octet-stream'})
 
 
 def test_file():
@@ -84,4 +84,4 @@ def test_file():
 
 def test_render():
     with open('README.md', 'rt') as readme:
-        url_test('/example/render_example/', ('GET',), 200, [readme.read().replace('~~test~~', 'pytest').encode()], method_params={'test': 'pytest'})
+        url_test('/examples/example/render_example/', ('GET',), 200, [readme.read().replace('~~test~~', 'pytest').encode()], method_params={'test': 'pytest'})

@@ -5,6 +5,7 @@ import struct
 import sys
 from base64 import b64encode
 from collections import namedtuple
+from _collections_abc import dict_keys
 from datetime import datetime
 from functools import partial
 from gzip import GzipFile
@@ -121,6 +122,8 @@ class App:
                 elif isinstance(body, dict):
                     body = json.dumps(body, default=json_serial).encode()
                     headers['Content-Type'] = 'application/json; charset=utf-8'
+                elif isinstance(body, dict_keys):
+                    body = list(body)
             elif isinstance(result, dict):
                 if 'body' in result:
                     body = result['body']
@@ -294,8 +297,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             env['REMOTE_HOST'] = host
             self.client_address = (host, self.client_address[1])
         env['CONTENT_LENGTH'] = int(self.headers.get('content-length', '0'))
-        while len(env['BODY']) != env['CONTENT_LENGTH']:
-            env['BODY'] += self.rfile.read(1)
+        if len(env['BODY']) != env['CONTENT_LENGTH']:
+            env['BODY'] += self.rfile.read(env['CONTENT_LENGTH'] - len(env['BODY']))
         boundary = re.findall(r'boundary=-*([\w]+)', self.headers.get('content-type', ''))  # boundary is used to catch multipart form data (includes file uploads)
         content_type = env['CONTENT_TYPE'].lower()
         if boundary:

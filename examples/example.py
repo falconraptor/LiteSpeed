@@ -51,7 +51,7 @@ def article(request, article, year):
 
 @route()
 def readme(request):
-    return serve('README.md')  # serve a file
+    return serve('../README.md')  # serve a file
 
 
 @route(r'(\w+\.\w+)', no_end_slash=True)
@@ -61,7 +61,15 @@ def file(request, file):
 
 @route(cors_methods=['get'], cors='*')  # set cors (cross origin) to allow from any domain if its a get request
 def render_example(request):
-    return render(request, 'README.md', {'test': request.GET.get('test', '')})  # replace ~~test~~ in the readme file with what is in the get request for the variable test
+    return render(request, '../README.md', {'test': request.GET.get('test', '')})  # replace ~~test~~ in the readme file with what is in the get request for the variable test
+
+
+@route(methods=['GET', 'POST'])
+def upload(request: Request):
+    print(request.FILES, request.POST)
+    if request.FILES:
+        return [_[0] for _ in request.FILES.values()], 200
+    return serve('examples/html/upload.html')
 
 
 def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____"

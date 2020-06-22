@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="LiteSpeed",
-    version="1.0.2",
+    version="1.0.3",
     author="Dustin Surwill",
     author_email="dustinsurwill@gmail.com",
     description="A simple, fast webserver that is mostly customizable",

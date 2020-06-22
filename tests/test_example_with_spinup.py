@@ -45,7 +45,7 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
         expected_headers = {}
     if not method_params:
         method_params = {}
-    if url[-1:] == '/':
+    if url[-1:] == '/' and not expected_status == 404:
         result = requests.get(f'http://localhost:{port}/{url[:-1]}'.replace(f':{port}//', f':{port}/'), allow_redirects=False)
         assert result.content == b''
         assert result.status_code == 307

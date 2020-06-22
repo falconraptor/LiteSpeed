@@ -12,7 +12,7 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
         expected_headers = {}
     if not method_params:
         method_params = {}
-    if url[-1:] == '/':
+    if url[-1:] == '/' and not expected_status == 404:
         data = {}
         result = App()({'PATH_INFO': url[:-1], 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET', 'GET': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         assert result[0] == b''

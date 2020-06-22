@@ -54,7 +54,7 @@ def readme(request):
     return serve('README.md')  # serve a file
 
 
-@route(r'([\w.]+)')
+@route(r'(\w+\.\w+)', no_end_slash=True)
 def file(request, file):
     return serve(file)  # serve a file from a parameter
 
@@ -77,4 +77,5 @@ def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____
 
 route(r'num/(?P<num>\d+)', f=test2)  # add function to routes without decorator: /num/[any number]/
 if __name__ == '__main__':
+    print(App._urls)
     start_with_args()  # routes should be declared before start

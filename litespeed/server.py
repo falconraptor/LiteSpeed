@@ -35,12 +35,12 @@ class App:
 
     def __call__(self, env: dict, start_response: Callable):
         path = env['PATH_INFO']
-        if path[-1:] != '/' and '.' not in path[-5:]:  # auto rediects to url that ends in / if there is no . in the end of the url (marks it as a file)
-            start_response('307 Moved Permanently', [('Location', f'{path}/')])
-            return [b'']
         f = self._handle_route_cache(path)
         if isinstance(f, bool):
             start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
+            return [b'']
+        if path[-1:] != '/' and not f[0].no_end_slash:  # auto rediects to url that ends in / if no_end_slash is False
+            start_response('307 Moved Permanently', [('Location', f'{path}/')])
             return [b'']
         if '*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods:  # checks for allowed methods
             start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
@@ -149,10 +149,11 @@ class App:
                 headers['Content-Encoding'] = 'gzip'
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 
-    def _handle_route_cache(self, path: str):
+    def _handle_route_cache(self, path: str) -> Union[bool, Callable]:
         if path not in self.__route_cache:  # finds url from urls and adds to ROUTE_CACHE to prevent future lookups
             for _, url in self._urls.items():
-                m = url.re.fullmatch(path[1:]) if path and path[0] == '/' and url.re.pattern[0] != '/' else url.re.fullmatch(path)
+                tmp = path + ('/' if not url.no_end_slash and path[-1] != '/' and url.re.pattern[-1] == '/' else '')
+                m = url.re.fullmatch(tmp[1:]) if tmp and tmp[0] == '/' and url.re.pattern[0] != '/' else url.re.fullmatch(tmp)
                 if m:
                     groups = m.groups()
                     for key, value in m.groupdict().items():
@@ -178,6 +179,7 @@ class App:
             if route_name is None:
                 route_name = url
             if route_name not in cls._urls:
+                func.no_end_slash = no_end_slash
                 func.url = url
                 func.re = re.compile(url)
                 func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.split(','))

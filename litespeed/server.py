@@ -138,6 +138,8 @@ class App:
                     headers['Content-Type'] = 'application/json; charset=utf-8'
             elif isinstance(result, (str, bytes)):
                 body = result
+        else:
+            status = '501 Not Implemented'
         if 'Content-Type' not in headers:  # add default html header if none passed
             headers['Content-Type'] = 'text/html; charset=utf-8'
         body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else [str(body).encode()] if isinstance(body, int) else body

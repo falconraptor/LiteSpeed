@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 from socketserver import ThreadingTCPServer
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
-from urllib.parse import unquote, unquote_plus
+from urllib.parse import parse_qs, unquote_plus
 from wsgiref.handlers import SimpleHandler
 
 from litespeed.mail import Mail
@@ -128,10 +128,13 @@ class App:
             self.error_routes[500] = self._500
 
     def _500(self, request: Request, *args, **kwargs):
-        e = ExceptionReporter(request, *sys.exc_info()).get_traceback_html()
+        e = '', 500
+        if self._admins or self.debug:
+            e = ExceptionReporter(request, *sys.exc_info()).get_traceback_html()
         if self._admins and not self.debug:
             Mail(f'Internal Server Error: {request["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), self._admins, html=e[0].decode()).embed().send()
-        return e if self.debug else '', 500
+            e = '', 500
+        return e
 
     def __call__(self, env: dict, start_response: Callable):
         path = env['PATH_INFO']
@@ -293,7 +296,6 @@ class App:
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 
     def _handle_route_cache(self, path: str) -> Union[bool, Callable]:
-        path = unquote_plus(path)
         if path not in self.__route_cache:  # finds url from urls and adds to ROUTE_CACHE to prevent future lookups
             for _, url in self._urls.items():
                 tmp = path + ('/' if not url.no_end_slash and path[-1] != '/' and url.re.pattern[-1] == '/' else '')
@@ -399,8 +401,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             except UnicodeDecodeError:
                 decoded = ''
             if content and ((decoded and not decoded.startswith('Content-Type')) or not decoded):
-                if name not in env['FILES']:
-                    env['FILES'][name] = (filename, file)
+                if filename not in env['FILES'].get(name, {}):
+                    if name not in env['FILES']:
+                        env['FILES'][name] = {filename: file}
+                    else:
+                        env['FILES'][name][filename] = file
                 if not skip_first:
                     file.write(line)
                 else:
@@ -413,26 +418,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             i += 1
 
     @staticmethod
-    def _decode_form_urlencoded(data: str, method: str, env: Request):
-        for q in data:
-            q = q.split('=', 1) if '=' in q else (q, None)
-            k, v = [unquote_plus(a) if a else a for a in q]
-            request_method = env[method]
-            if k in request_method:
-                try:
-                    request_method[k].append(v)
-                except AttributeError:
-                    request_method[k] = [request_method[k], v]
-            else:
-                request_method[k] = v
+    def _parse_qs(qs) -> dict:
+        return {k: v if len(v) > 1 else v[0] for k, v in parse_qs(qs).items()}
 
     def get_environ(self) -> Request:
         """Read headers / body and generate Request object.
         :returns:Request"""
-        env = Request({'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}, 'COOKIE': SimpleCookie(self.headers.get('COOKIE')), 'HEADERS': dict(self.headers), 'REMOTE_ADDR': self.client_address[0], 'CONTENT_TYPE': self.headers.get_content_type()})
+        env = Request({'SERVER_PROTOCOL': self.request_version, 'SERVER_SOFTWARE': self.server_version, 'REQUEST_METHOD': self.command.upper(), 'BODY': b'', 'GET': {}, 'POST': {}, 'PATCH': {}, 'PUT': {}, 'OPTIONS': {}, 'DELETE': {}, 'FILES': {}, 'COOKIE': SimpleCookie(self.headers.get('COOKIE')), 'HEADERS': dict(self.headers), 'REMOTE_ADDR': self.client_address[0], 'CONTENT_TYPE': self.headers.get_content_type(), 'HOST': self.headers['HOST']})
         env['HEADERS'] = {k.upper().strip(): v for k, v in env['HEADERS'].items()}
         path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
-        env['PATH_INFO'] = unquote(path, 'iso-8859-1')
+        env['PATH_INFO'] = unquote_plus(path, 'iso-8859-1')
         host = env['HEADERS'].get('X-REAL-IP') or env['HEADERS'].get('X-FORWARDED-FOR') or self.address_string()
         if host != self.client_address[0]:
             env['REMOTE_HOST'] = host
@@ -447,7 +442,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         elif content_type == 'application/json' and env['BODY']:
             env[env['REQUEST_METHOD']] = json.loads(env['BODY'])
         elif content_type == 'application/x-www-form-urlencoded':
-            self._decode_form_urlencoded(env['BODY'].decode().split('&'), env['REQUEST_METHOD'], env)
+            env[env['REQUEST_METHOD']] = self._parse_qs(env['BODY'].decode())
         elif content_type == 'multipart/form-data':
             for q in re.sub(r'-{15,}\d+', '+@~!@+', env['BODY'].decode().replace('\n', '')).split('+@~!@+'):
                 if '=' in q:
@@ -463,7 +458,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     else:
                         request_method[k] = v
         if env['QUERY_STRING']:
-            self._decode_form_urlencoded(env['QUERY_STRING'].split('&'), 'GET', env)
+            env['GET'] = self._parse_qs(env['QUERY_STRING'])
         return env
 
     def handle(self):

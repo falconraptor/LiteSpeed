@@ -26,7 +26,7 @@ class ExceptionReporter:
                 frame_vars = []
                 for k, v in frame['vars']:
                     if isinstance(v, Request):
-                        continue
+                        v = {k: v for k, v in v.items() if 'wsgi' not in k and k not in {'BODY'}}
                     try:
                         if isinstance(v, Dict):
                             if len(v) > 1000:
@@ -39,7 +39,7 @@ class ExceptionReporter:
                             else:
                                 v = json.dumps(v, indent=4, sort_keys=True, default=json_serial).replace('\n', '<br>').replace(' ', '&nbsp;')
                         else:
-                            v = repr(v)
+                            v = repr(v).replace('<', '&lt;').replace('>', '&gt;')
                     except Exception as e:
                         v = f"Error in formatting: {e.__class__.__name__}: {e}".replace('<', '&lt;').replace('>', '&gt;')
                     frame_vars.append((k, repr(v) if not isinstance(v, str) else v))

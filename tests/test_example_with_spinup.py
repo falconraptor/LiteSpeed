@@ -139,8 +139,8 @@ def test_css(server):
 
 
 def test_static(server):
-    with open('examples/static/test.css', 'rb') as file:
-        url_test('/static/test.css', ('GET',), 200, file.read(), port=server)
+    with open('examples/static/css with a space.css', 'rb') as file:
+        url_test('/static/css with a space.css', ('GET',), 200, file.read(), port=server)
 
 
 def test_echo(server):

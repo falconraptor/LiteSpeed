@@ -76,7 +76,7 @@ def css(request: Request):
     return serve('examples/static/test.css')
 
 
-@route(r'/static/([\w./]+)', methods=['GET'], no_end_slash=True)
+@route(r'/static/([\w\s./]+)', methods=['GET'], no_end_slash=True)
 def static(_: Request, file: str):
     return serve(f'examples/static/{file}')
 
@@ -100,7 +100,7 @@ def echo(client: dict, server: WebServer, msg: str):
 
 
 @register_error_page(501)
-def _501(request: Request):
+def _501(request: Request, *args, **kwargs):
     return 'This is a 501 error', 501
 
 

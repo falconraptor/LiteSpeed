@@ -98,8 +98,8 @@ def test_css():
 
 
 def test_static():
-    with open('examples/static/test.css', 'rb') as file:
-        url_test('/static/test.css', ('GET',), 200, [file.read()])
+    with open('examples/static/css with a space.css', 'rb') as file:
+        url_test('/static/css with a space.css', ('GET',), 200, [file.read()])
 
 
 def test_501():

@@ -127,7 +127,7 @@ class App:
         if 500 not in self.error_routes:
             self.error_routes[500] = self._500
 
-    def _500(self, request):
+    def _500(self, request: Request, *args, **kwargs):
         e = ExceptionReporter(request, *sys.exc_info()).get_traceback_html()
         if self._admins and not self.debug:
             Mail(f'Internal Server Error: {request["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), self._admins, html=e[0].decode()).embed().send()
@@ -293,6 +293,7 @@ class App:
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 
     def _handle_route_cache(self, path: str) -> Union[bool, Callable]:
+        path = unquote_plus(path)
         if path not in self.__route_cache:  # finds url from urls and adds to ROUTE_CACHE to prevent future lookups
             for _, url in self._urls.items():
                 tmp = path + ('/' if not url.no_end_slash and path[-1] != '/' and url.re.pattern[-1] == '/' else '')

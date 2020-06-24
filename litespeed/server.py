@@ -15,12 +15,100 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 from socketserver import ThreadingTCPServer
-from typing import Any, Callable, Iterable, List, Optional, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 from urllib.parse import unquote, unquote_plus
 from wsgiref.handlers import SimpleHandler
 
 from litespeed.mail import Mail
 from litespeed.utils import ExceptionReporter, json_serial, Request
+
+
+class WebServer(ThreadingTCPServer):
+    request_queue_size = 500
+    allow_reuse_address = True
+    application = None
+    base_environ = Request()
+    daemon_threads = True
+    clients, handlers = {}, {}
+    id_counter = 0
+    functions = {'new': [], 'message': [], 'left': []}
+
+    def __init__(self, server_address, RequestHandlerClass, bind_and_activate: bool = True):
+        super().__init__(server_address, RequestHandlerClass, bind_and_activate)
+
+    def server_bind(self):
+        """Override server_bind to store the server name."""
+        super().server_bind()
+        self.setup_env(self.server_address[1])
+
+    @classmethod
+    def attach_websocket_handler(cls, type: str, function: Callable[[dict, ThreadingTCPServer, Optional[str]], None]):
+        if type not in {'new', 'message', 'left'}:
+            raise ValueError
+        cls.functions[type].append(function)
+
+    @classmethod
+    def setup_env(cls, port: int):
+        if not cls.base_environ:
+            cls.base_environ = Request({'SERVER_NAME': socket.gethostname(), 'GATEWAY_INTERFACE': 'CGI/1.1', 'SERVER_PORT': str(port), 'REMOTE_HOST': '', 'CONTENT_LENGTH': '', 'SCRIPT_NAME': ''})
+
+    def message_received(self, handler, msg):
+        self.handle(self.handlers[id(handler)], 'message', msg)
+
+    def new_client(self, handler, env):
+        self.id_counter += 1
+        client = {
+            'id': self.id_counter,
+            'handler': handler,
+            'request': env,
+            'handler_id': id(handler)
+        }
+        self.handlers[client['handler_id']] = self.clients[client['id']] = client
+        self.handle(client, 'new')
+
+    def client_left(self, handler):
+        try:
+            client = self.handlers[id(handler)]
+            self.handle(client, 'left')
+            del self.clients[client['id']]
+            del self.handlers[client['handler_id']]
+        except KeyError:
+            pass
+        for client in list(self.clients.values()):
+            if client['handler'].connection._closed:
+                del self.clients[client['id']]
+                del self.handlers[client['handler_id']]
+        for client in list(self.handlers.values()):
+            if client['handler'].connection._closed:
+                del self.clients[client['id']]
+                del self.handlers[client['handler_id']]
+
+    def handle(self, client, type: str, msg=None):
+        for f in self.functions[type]:
+            f(client, self, *([msg] if msg else []))
+
+    @staticmethod
+    def send_message(client, msg):
+        client['handler'].send_message(msg)
+
+    @staticmethod
+    def send_json(client, obj):
+        client['handler'].send_json(obj)
+
+    def send_message_all(self, msg):
+        for client in self.clients.values():
+            client['handler'].send_message(msg)
+
+    def send_json_all(self, obj):
+        for client in self.clients.values():
+            client['handler'].send_json(obj)
+
+    def serve(self):
+        print('Server Started on', f'{self.server_address}')
+        try:
+            self.serve_forever(.1)
+        except KeyboardInterrupt:
+            self.shutdown()
 
 
 class App:
@@ -33,36 +121,67 @@ class App:
     _cors_origins_allow = set()
     _cors_methods_allow = set()
     _admins = []
+    error_routes = {}
+
+    def __init__(self):
+        if 500 not in self.error_routes:
+            self.error_routes[500] = self._500
+
+    def _500(self, request):
+        e = ExceptionReporter(request, *sys.exc_info()).get_traceback_html()
+        if self._admins and not self.debug:
+            Mail(f'Internal Server Error: {request["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), self._admins, html=e[0].decode()).embed().send()
+        return e if self.debug else '', 500
 
     def __call__(self, env: dict, start_response: Callable):
         path = env['PATH_INFO']
         f = self._handle_route_cache(path)
-        if isinstance(f, bool):
-            start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
-            return [b'']
-        if path[-1:] != '/' and not f[0].no_end_slash:  # auto rediects to url that ends in / if no_end_slash is False
-            start_response('307 Moved Permanently', [('Location', f'{path}/')])
-            return [b'']
-        if '*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods:  # checks for allowed methods
-            start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
-            return [b'']
-        headers = {}
-        r = self._handle_cors(f, headers, env)
-        if isinstance(r, tuple):
-            start_response(*r[1:])
-            return r[0]
         env = Request(env)
+        headers = {}
         cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
+        called = False
         try:
-            result = f[0](env, *f[1], **f[2])
+            if isinstance(f, bool):
+                if 404 in self.error_routes:
+                    result = self.error_routes[404](env, *f[1], **f[2])
+                else:
+                    start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
+                    return [b'']
+            if path[-1:] != '/' and not f[0].no_end_slash:  # auto rediects to url that ends in / if no_end_slash is False
+                if 307 in self.error_routes:
+                    result = self.error_routes[307](env, *f[1], **f[2])
+                else:
+                    start_response('307 Moved Permanently', [('Location', f'{path}/')])
+                    return [b'']
+            r = self._handle_cors(f, headers, env)
+            if ('*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods) or not r:  # checks for allowed methods
+                if 405 in self.error_routes:
+                    result = self.error_routes[405](env, *f[1], **f[2])
+                else:
+                    start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
+                    return [b'']
+            if 'result' not in locals():
+                result = f[0](env, *f[1], **f[2])
+                called = True
         except Exception:
-            e = ExceptionReporter(env, *sys.exc_info()).get_traceback_html()
-            if self._admins and not self.debug:
-                Mail(f'Internal Server Error: {env["PATH_INFO"]}', '\n'.join(str(e) for e in sys.exc_info()), self._admins, html=e[0].decode()).embed().send()
-            result = e if self.debug else ('', 500)
+            result = self.error_routes[500](env, *f[1], **f[2])
         r = self._handle_result(result, headers, cookie, env)
+        status = int(r[1].split()[0])
+        if called and status in self.error_routes:
+            r = self._handle_result(self.error_routes[status](env, *f[1], **f[2]), headers, cookie, env)
         start_response(*r[1:])
         return r[0]
+
+    @classmethod
+    def register_error_route(cls, code: int, function: Callable):
+        cls.error_routes[code] = function
+
+    @classmethod
+    def register_error_page(cls, code: int):
+        def _wrapped(f: Callable):
+            cls.register_error_route(code, f)
+            return f
+        return _wrapped
 
     @staticmethod
     def compress_string(s: str) -> bytes:
@@ -72,38 +191,43 @@ class App:
             zfile.write(s)
         return zbuf.getvalue()
 
-    def _handle_cors(self, f: Callable, headers: dict, env: dict):
-        def _check_cors():
-            cors = f[0].cors or self._cors_origins_allow  # checks for cors allowed dowmains using route override of global
+    def _handle_cors(self, f: Callable, headers: dict, env: dict) -> bool:
+        def _check_cors() -> bool:
+            cors = f[0].cors or self._cors_origins_allow  # checks for cors allowed domains using route override of global
             if cors:
                 if '*' in cors:
                     headers['Access-Control-Allow-Origin'] = '*'
                 elif env.get('ORIGIN', '').lower() in cors:
                     headers['Access-Control-Allow-Origin'] = env['ORIGIN']
                 else:
-                    return [b''], '405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')]
+                    return False
+            return True
 
         methods = f[0].cors_methods or self._cors_methods_allow
         if methods:  # checks for cors allowed methods using route override of global
             if '*' in methods:
                 headers['Access-Control-Allow-Method'] = '*'
+                return True
             elif env['REQUEST_METHOD'].lower() in methods:
                 headers['Access-Control-Allow-Method'] = env['REQUEST_METHOD']
                 return _check_cors()
             else:
-                return [b''], '405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')]
+                return False
         else:
             return _check_cors()
 
     @staticmethod
-    def add_websocket_handler(type: str, function: Callable):
+    def add_websocket_handler(type: str, function: Callable[[dict, WebServer, Optional[str]], None]):
         if type not in {'new', 'message', 'left'}:
             raise ValueError
         WebServer.functions[type].append(function)
 
     @classmethod
     def add_websocket(cls, type: str):
-        def _wrapped(f):
+        if type not in {'new', 'message', 'left'}:
+            raise ValueError
+
+        def _wrapped(f: Callable[[dict, WebServer, Optional[str]], None]):
             cls.add_websocket_handler(type, f)
             return f
         return _wrapped
@@ -117,7 +241,7 @@ class App:
         elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
             headers.update(dict(result))
 
-    def _handle_result(self, result, headers: dict, cookie: set, env: Request):
+    def _handle_result(self, result, headers: dict, cookie: set, env: Request) -> Tuple[List[bytes], str, List[tuple]]:
         body = ''
         status = '200 OK'
         if result:  # if result is not None parse for body, _status, headers
@@ -152,7 +276,7 @@ class App:
                     headers['Content-Type'] = 'application/json; charset=utf-8'
             elif isinstance(result, (str, bytes)):
                 body = result
-        else:
+        else:  # set 501 status code when falsy result
             status = '501 Not Implemented'
         if 'Content-Type' not in headers:  # add default html header if none passed
             headers['Content-Type'] = 'text/html; charset=utf-8'
@@ -192,7 +316,7 @@ class App:
         def decorated(func) -> partial:
             nonlocal url, route_name
             if url is None:
-                url = (func.__module__ + '/').replace('__main__/', '') + (func.__name__ + '/').replace('index/', '')
+                url = (func.__module__.replace('.', '/') + '/').replace('__main__/', '') + (func.__name__ + '/').replace('index/', '')
             if not url or (url[-1] != '/' and '.' not in url[-5:] and not no_end_slash):
                 url = (url or '') + '/'
             if route_name is None:
@@ -458,91 +582,3 @@ class ServerHandler(SimpleHandler):
             Mail(f'Internal Server Error: {environ.get("PATH_INFO", "???")}', '\n'.join(str(e) for e in sys.exc_info()), App._admins, html=er.decode()).embed().send()
         start_response(self.error_status, self.error_headers[:] if not App.debug else [('Content-Type', 'text/html')], sys.exc_info())
         return [er] if App.debug else [self.error_body]
-
-
-class WebServer(ThreadingTCPServer):
-    request_queue_size = 500
-    allow_reuse_address = True
-    application = None
-    base_environ = Request()
-    daemon_threads = True
-    clients, handlers = {}, {}
-    id_counter = 0
-    functions = {'new': [], 'message': [], 'left': []}
-
-    def __init__(self, server_address, RequestHandlerClass, bind_and_activate: bool = True):
-        super().__init__(server_address, RequestHandlerClass, bind_and_activate)
-
-    def server_bind(self):
-        """Override server_bind to store the server name."""
-        super().server_bind()
-        self.setup_env(self.server_address[1])
-
-    @classmethod
-    def attach_websocket_handler(cls, type: str, function: Callable):
-        if type not in {'new', 'message', 'left'}:
-            raise ValueError
-        cls.functions[type].append(function)
-
-    @classmethod
-    def setup_env(cls, port: int):
-        if not cls.base_environ:
-            cls.base_environ = Request({'SERVER_NAME': socket.gethostname(), 'GATEWAY_INTERFACE': 'CGI/1.1', 'SERVER_PORT': str(port), 'REMOTE_HOST': '', 'CONTENT_LENGTH': '', 'SCRIPT_NAME': ''})
-
-    def message_received(self, handler, msg):
-        self.handle(self.handlers[id(handler)], 'message', msg)
-
-    def new_client(self, handler, env):
-        self.id_counter += 1
-        client = {
-            'id': self.id_counter,
-            'handler': handler,
-            'request': env,
-            'handler_id': id(handler)
-        }
-        self.handlers[client['handler_id']] = self.clients[client['id']] = client
-        self.handle(client, 'new')
-
-    def client_left(self, handler):
-        try:
-            client = self.handlers[id(handler)]
-            self.handle(client, 'left')
-            del self.clients[client['id']]
-            del self.handlers[client['handler_id']]
-        except KeyError:
-            pass
-        for client in list(self.clients.values()):
-            if client['handler'].connection._closed:
-                del self.clients[client['id']]
-                del self.handlers[client['handler_id']]
-        for client in list(self.handlers.values()):
-            if client['handler'].connection._closed:
-                del self.clients[client['id']]
-                del self.handlers[client['handler_id']]
-
-    def handle(self, client, type: str, msg=None):
-        for f in self.functions[type]:
-            f(client, self, *([msg] if msg else []))
-
-    @staticmethod
-    def send_message(client, msg):
-        client['handler'].send_message(msg)
-
-    @staticmethod
-    def send_json(client, obj):
-        client['handler'].send_json(obj)
-
-    def send_message_all(self, msg):
-        for client in self.clients.values():
-            client['handler'].send_message(msg)
-
-    def send_json_all(self, obj):
-        for client in self.clients.values():
-            client['handler'].send_json(obj)
-
-    def serve(self):
-        print('Server Started on', f'{self.server_address}')
-        try:
-            self.serve_forever(.1)
-        except KeyboardInterrupt:
-            self.shutdown()

@@ -14,14 +14,14 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
         method_params = {}
     if url[-1:] == '/' and not expected_status == 404:
         data = {}
-        result = App()({'PATH_INFO': url[:-1], 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET', 'GET': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
+        result = App()({'PATH_INFO': url[:-1], 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET', 'GET': {}, 'FILES': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         assert result[0] == b''
         assert data['status'] == '307 Moved Permanently'
         assert data['headers']['Location'] == url
     allowed_methods = {method.upper() for method in allowed_methods}
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
         data = {}
-        result = App()({'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method, method: method_params}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
+        result = App()({'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method, method: method_params, 'FILES': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         if method in allowed_methods or '*' in allowed_methods:
             assert result == expected_result
             assert data['status'] == App._status[expected_status]
@@ -46,7 +46,7 @@ def test_another():
 
 def test_json():
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
-        url_test('/examples/example/json/', (method,), 200, [f'{{"PATH_INFO": "/examples/example/json/", "COOKIE": {{}}, "REQUEST_METHOD": "{method}", "{method}": {{}}}}'.encode()], skip_405=True)
+        url_test('/examples/example/json/', (method,), 200, [f'{{"PATH_INFO": "/examples/example/json/", "COOKIE": {{}}, "REQUEST_METHOD": "{method}", "{method}": {{}}, "FILES": {{}}}}'.encode()], skip_405=True)
 
 
 def test_test2():
@@ -87,6 +87,20 @@ def test_render():
         url_test('/examples/example/render_example/', ('GET',), 200, [readme.read().replace('~~test~~', 'pytest').encode()], method_params={'test': 'pytest'})
 
 
+def test_upload():
+    with open('examples/html/upload.html', 'rb') as file:
+        url_test('/examples/example/upload/', ('GET', 'POST'), 200, [file.read()])
+
+
 def test_css():
-    with open('examples/test.css', 'rb') as file:
-        url_test('/examples/example/css/', ('GET',), 200, [file.read()], {'Content-Type': mimetypes.guess_type('examples/test.css')[0]})
+    with open('examples/static/test.css', 'rb') as file:
+        url_test('/examples/example/css/', ('GET',), 200, [file.read()], {'Content-Type': mimetypes.guess_type('examples/static/test.css')[0]})
+
+
+def test_static():
+    with open('examples/static/test.css', 'rb') as file:
+        url_test('/static/test.css', ('GET',), 200, [file.read()])
+
+
+def test_501():
+    url_test('/examples/example/_501/', ('GET',), 501, [b'This is a 501 error'])

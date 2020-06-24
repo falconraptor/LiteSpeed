@@ -1,4 +1,5 @@
 import _socket
+import json
 import mimetypes
 from contextlib import closing
 from random import randint
@@ -7,6 +8,7 @@ from typing import Iterable
 
 import pytest
 import requests
+from websocket import WebSocket
 
 from examples import example
 from litespeed import App
@@ -28,28 +30,30 @@ def _server():
         t.start()
         while True:
             try:
-                requests.get(f'http://localhost:{_server.port}', timeout=.01)
+                requests.get(f'http://127.0.0.1:{_server.port}', timeout=.01)
                 break
             except ConnectionError:
                 pass
     return _server.port
 
 
-def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: bytes, expected_headers: dict = None, skip_405: bool = False, method_params: dict = None, port: int = 8000):
+def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: bytes, expected_headers: dict = None, skip_405: bool = False, method_params: dict = None, port: int = 8000, method_kwargs: dict = None):
     if url[-1:] != '/' and '.' not in url[-5:] and '?':
         url += '/'
     if not expected_headers:
         expected_headers = {}
     if not method_params:
         method_params = {}
+    if not method_kwargs:
+        method_kwargs = {}
     if url[-1:] == '/' and not expected_status == 404:
-        result = requests.get(f'http://localhost:{port}/{url[:-1]}'.replace(f':{port}//', f':{port}/'), allow_redirects=False)
+        result = requests.get(f'http://127.0.0.1:{port}/{url[:-1]}'.replace(f':{port}//', f':{port}/'), allow_redirects=False)
         assert result.content == b''
         assert result.status_code == 307
         assert result.headers['Location'] == url or result.headers['Location'] == f'/{url}'
     allowed_methods = {method.upper() for method in allowed_methods}
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
-        result = getattr(requests, method.lower())(f'http://localhost:{port}/{url}'.replace(f':{port}//', f':{port}/'), *([method_params] if method not in {'DELETE', 'OPTIONS'} else []))
+        result = getattr(requests, method.lower())(f'http://127.0.0.1:{port}/{url}'.replace(f':{port}//', f':{port}/'), *([method_params] if method not in {'DELETE', 'OPTIONS'} else []), **method_kwargs)
         if method in allowed_methods or '*' in allowed_methods:
             assert result.content == expected_result
             assert result.status_code == expected_status
@@ -74,12 +78,12 @@ def test_another(server):
 
 def test_json(server):
     url = '/examples/example/json/'
-    result = requests.get(f'http://localhost:{server}/{url[:-1]}'.replace(f':{server}//', f':{server}/'), allow_redirects=False)
+    result = requests.get(f'http://127.0.0.1:{server}/{url[:-1]}'.replace(f':{server}//', f':{server}/'), allow_redirects=False)
     assert result.content == b''
     assert result.status_code == 307
     assert result.headers['Location'] == url
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
-        result = getattr(requests, method.lower())(f'http://localhost:{server}/{url}'.replace(f':{server}//', f':{server}/'))
+        result = getattr(requests, method.lower())(f'http://127.0.0.1:{server}/{url}'.replace(f':{server}//', f':{server}/'))
         result.json()
         assert result.status_code == 200
 
@@ -122,6 +126,32 @@ def test_render(server):
         url_test('/examples/example/render_example/', ('GET',), 200, readme.read().replace('~~test~~', 'pytest').encode(), method_params={'test': 'pytest'}, port=server)
 
 
-def test_css():
-    with open('examples/test.css', 'rb') as file:
-        url_test('/examples/example/css/', ('GET',), 200, file.read(), {'Content-Type': mimetypes.guess_type('examples/test.css')[0]}, port=server)
+def test_upload(server):
+    with open('examples/html/upload.html', 'rb') as file:
+        url_test('/examples/example/upload/', ('GET', 'POST'), 200, file.read(), port=server)
+    # with open('litespeed/server.py', 'rb') as file:  # TODO figure out why requests doesnt send Content-Type or lookup file upload boundary standard
+    #     url_test('/examples/example/upload/', ('POST',), 200, b'server.py', method_kwargs={'files': {'file': file}}, port=server, skip_405=True)
+
+
+def test_css(server):
+    with open('examples/static/test.css', 'rb') as file:
+        url_test('/examples/example/css/', ('GET',), 200, file.read(), {'Content-Type': mimetypes.guess_type('examples/static/test.css')[0]}, port=server)
+
+
+def test_static(server):
+    with open('examples/static/test.css', 'rb') as file:
+        url_test('/static/test.css', ('GET',), 200, file.read(), port=server)
+
+
+def test_echo(server):
+    ws = WebSocket()
+    ws.connect(f'ws://127.0.0.1:{server}')
+    ws.send('Hello World!')
+    data = json.loads(ws.recv())
+    assert {'msg': 'Hello World!', 'id': 1} == data
+    data = json.loads(ws.recv())
+    assert {'msg': 'Hello World!', 'id': 1} == data
+
+
+def test_501(server):
+    url_test('/examples/example/_501/', ('GET',), 501, b'This is a 501 error', port=server)

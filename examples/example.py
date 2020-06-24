@@ -1,4 +1,4 @@
-from litespeed import App, render, route, serve, start_with_args, start_server
+from litespeed import add_websocket, App, register_error_page, render, route, serve, start_with_args, start_server, WebServer
 from litespeed.utils import Request
 
 """Any function with a route decorator must follow one of the following return patterns:
@@ -66,7 +66,6 @@ def render_example(request: Request):
 
 @route(methods=['GET', 'POST'])
 def upload(request: Request):
-    print(request.FILES, request.POST)
     if request.FILES:
         return [_[0] for _ in request.FILES.values()], 200
     return serve('examples/html/upload.html')
@@ -74,7 +73,12 @@ def upload(request: Request):
 
 @route(methods=['GET'])
 def css(request: Request):
-    return serve('examples/test.css')
+    return serve('examples/static/test.css')
+
+
+@route(r'/static/([\w./]+)', methods=['GET'], no_end_slash=True)
+def static(_: Request, file: str):
+    return serve(f'examples/static/{file}')
 
 
 def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____"
@@ -86,6 +90,23 @@ def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____
 
     wrapped.__name__ = f.__name__  # for if there is an error in the wrapped function, without it the exception would say the error is in a function named "wrapped"
     return wrapped
+
+
+@add_websocket('message')  # message can be replaced with new or left
+def echo(client: dict, server: WebServer, msg: str):
+    server.send_json(client, {'id': client['id'], 'msg': msg})  # can use either this or the next line
+    client['handler'].send_json({'id': client['id'], 'msg': msg})
+    # there is also a send_all and send_json_all functions in server
+
+
+@register_error_page(501)
+def _501(request: Request):
+    return 'This is a 501 error', 501
+
+
+@route(methods=['GET'])
+def _501(request: Request):
+    return '', 501
 
 
 route(r'num/(?P<num>\d+)', f=test2)  # add function to routes without decorator: /num/[any number]/

@@ -15,52 +15,52 @@ def test(request):
 
 
 @route('example2')  # specify url directly: /example2/
-def other(request):
+def other(request: Request):
     return 'Other', None, {'Testing': 'Header'}  # return text and header values with default 200 status
 
 
 @route('other/txt', methods=['post'])  # specify url and lock to certain methods: anything but post will return 405
-def another(request):
+def another(request: Request):
     return 'Txt', 204  # return text and status 204 (no content)
 
 
 @route()  # uses method name to generate url: /json/
-def json(request):
+def json(request: Request):
     return request  # return json version of request
 
 
 @route(r'(\d{2})')  # use regex groups to generate url: /[any 2 digit number]/
-def test2(request, num):
+def test2(request: Request, num: int):
     return f'Test2 [{num}]'  # return text only with default 200 status
 
 
 @route()  # uses method name to generate url but because it is index: /
-def index(request):
+def index(request: Request):
     return [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()]  # return list of urls which gets joined and sent to client
 
 
 @route()  # uses method name to generate url: /index2/
-def index2(request):  # for use when len(urls) <= 3
+def index2(request: Request):  # for use when len(urls) <= 3
     return [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()], 200  # return list of urls which gets joined and sent to client with status 200
 
 
 @route(r'(?P<year>\d{4})/(?P<article>\d+)')  # use regex named groups to generate url: /[any 4 digit number]/[any number]/
-def article(request, article, year):
+def article(request: Request, article: int, year: int):
     return f'This is article {article} from year {year}'
 
 
 @route()
-def readme(request):
+def readme(request: Request):
     return serve('../README.md')  # serve a file
 
 
 @route(r'(\w+\.\w+)', no_end_slash=True)
-def file(request, file):
+def file(request: Request, file: str):
     return serve(file)  # serve a file from a parameter
 
 
 @route(cors_methods=['get'], cors='*')  # set cors (cross origin) to allow from any domain if its a get request
-def render_example(request):
+def render_example(request: Request):
     return render(request, '../README.md', {'test': request.GET.get('test', '')})  # replace ~~test~~ in the readme file with what is in the get request for the variable test
 
 
@@ -70,6 +70,11 @@ def upload(request: Request):
     if request.FILES:
         return [_[0] for _ in request.FILES.values()], 200
     return serve('examples/html/upload.html')
+
+
+@route(methods=['GET'])
+def css(request: Request):
+    return serve('examples/test.css')
 
 
 def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____"

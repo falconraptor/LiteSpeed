@@ -85,3 +85,8 @@ def test_file():
 def test_render():
     with open('README.md', 'rt') as readme:
         url_test('/examples/example/render_example/', ('GET',), 200, [readme.read().replace('~~test~~', 'pytest').encode()], method_params={'test': 'pytest'})
+
+
+def test_css():
+    with open('examples/test.css', 'rb') as file:
+        url_test('/examples/example/css/', ('GET',), 200, [file.read()], {'Content-Type': mimetypes.guess_type('examples/test.css')[0]})

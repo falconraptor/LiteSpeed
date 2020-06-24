@@ -95,28 +95,29 @@ class App:
         else:
             return _check_cors()
 
+    @staticmethod
+    def _handle_result_process_headers(result, headers: dict, request_headers):
+        if isinstance(request_headers, dict):
+            headers.update(request_headers)
+        elif isinstance(request_headers, tuple):
+            headers.update(dict(request_headers))
+        elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
+            headers.update(dict(result))
+
     def _handle_result(self, result, headers: dict, cookie: set, env: Request):
         body = ''
         status = '200 OK'
         if result:  # if result is not None parse for body, _status, headers
-            def process_headers(request_headers):
-                if isinstance(request_headers, dict):
-                    headers.update(request_headers)
-                elif isinstance(request_headers, tuple):
-                    headers.update(dict(request_headers))
-                elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
-                    headers.update(dict(result))
-
             if isinstance(result, (tuple, type(namedtuple), list)):
                 l_result = len(result)
                 body = result[0] if l_result <= 3 else result
                 if 3 >= l_result > 1:
                     if not result[1]:
-                        status = self._status[200]
+                        status = '200 OK'
                     else:
                         status = self._status[result[1]] if isinstance(result[1], int) else result[1] if not isinstance(result[1], HTTPStatus) else f'{result[1].value} {result[1].phrase}'
                     if l_result > 2 and result[2]:
-                        process_headers(result[2])
+                        self._handle_result_process_headers(result, headers, result[2])
                 if callable(body):
                     body = body()
                 elif isinstance(body, dict):
@@ -132,7 +133,7 @@ class App:
                 if '_status' in result:
                     status = self._status[result['_status']] if isinstance(result['_status'], int) else result['_status'] if not isinstance(result['_status'], HTTPStatus) else f'{result["_status"].value} {result["_status"].phrase}'
                 if 'headers' in result:
-                    process_headers(result['headers'])
+                    self._handle_result_process_headers(result, headers, result['headers'])
                 if not (body or status != '200 OK'):
                     body = json.dumps(result, default=json_serial).encode()
                     headers['Content-Type'] = 'application/json; charset=utf-8'

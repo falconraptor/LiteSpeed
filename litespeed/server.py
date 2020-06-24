@@ -96,6 +96,19 @@ class App:
             return _check_cors()
 
     @staticmethod
+    def add_websocket_handler(type: str, function: Callable):
+        if type not in {'new', 'message', 'left'}:
+            raise ValueError
+        WebServer.functions[type].append(function)
+
+    @classmethod
+    def add_websocket(cls, type: str):
+        def _wrapped(f):
+            cls.add_websocket_handler(type, f)
+            return f
+        return _wrapped
+
+    @staticmethod
     def _handle_result_process_headers(result, headers: dict, request_headers):
         if isinstance(request_headers, dict):
             headers.update(request_headers)
@@ -455,15 +468,21 @@ class WebServer(ThreadingTCPServer):
     daemon_threads = True
     clients, handlers = {}, {}
     id_counter = 0
+    functions = {'new': [], 'message': [], 'left': []}
 
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate: bool = True):
         super().__init__(server_address, RequestHandlerClass, bind_and_activate)
-        self.functions = {'new': [], 'message': [], 'left': []}
 
     def server_bind(self):
         """Override server_bind to store the server name."""
         super().server_bind()
         self.setup_env(self.server_address[1])
+
+    @classmethod
+    def attach_websocket_handler(cls, type: str, function: Callable):
+        if type not in {'new', 'message', 'left'}:
+            raise ValueError
+        cls.functions[type].append(function)
 
     @classmethod
     def setup_env(cls, port: int):
@@ -478,12 +497,10 @@ class WebServer(ThreadingTCPServer):
         client = {
             'id': self.id_counter,
             'handler': handler,
-            'address': handler.client_address,
             'request': env,
             'handler_id': id(handler)
         }
-        self.clients[client['id']] = client
-        self.handlers[client['handler_id']] = client
+        self.handlers[client['handler_id']] = self.clients[client['id']] = client
         self.handle(client, 'new')
 
     def client_left(self, handler):

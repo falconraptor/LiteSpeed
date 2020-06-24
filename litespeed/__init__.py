@@ -6,7 +6,8 @@ from litespeed.mail import Mail
 from litespeed.server import App, RequestHandler, WebServer
 
 route = App.route
-__all__ = ['Mail', 'start_with_args', 'route', 'serve', 'render']
+add_websocket = App.add_websocket
+__all__ = ['Mail', 'start_with_args', 'route', 'serve', 'render', 'add_websocket', 'App']
 
 
 def start_server(application=App, bind: str = '0.0.0.0', port: int = 8000, cors_allow_origin: Union[Iterable, str] = None, cors_methods: Union[Iterable, str] = None, cookie_max_age: int = 7 * 24 * 3600, handler=RequestHandler, serve: bool = True, debug: bool = False, admins: Optional[List[str]] = None, default_email: Optional[str] = None, default_email_username: Optional[str] = None, default_email_password: Optional[str] = None, default_email_host: Optional[str] = None, default_email_port: Optional[int] = None, default_email_tls: Optional[bool] = None, default_email_ssl: Optional[bool] = None, default_email_timeout: Optional[int] = None) -> WebServer:

@@ -124,4 +124,4 @@ def test_render(server):
 
 def test_css():
     with open('examples/test.css', 'rb') as file:
-        url_test('/examples/example/css/', ('GET',), 200, file.read(), {'Content-Type': mimetypes.guess_type('examples/test.css')[0]})
+        url_test('/examples/example/css/', ('GET',), 200, file.read(), {'Content-Type': mimetypes.guess_type('examples/test.css')[0]}, port=server)

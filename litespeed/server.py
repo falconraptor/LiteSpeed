@@ -170,7 +170,7 @@ class App:
             result = self.error_routes[500](env, *f[1], **f[2])
         r = self._handle_result(result, headers, cookie, env)
         status = int(r[1].split()[0])
-        if called and status in self.error_routes:
+        if called and status in self.error_routes and status not in f[0].disable_default_errors:
             r = self._handle_result(self.error_routes[status](env, *f[1], **f[2]), headers, cookie, env)
         start_response(*r[1:])
         return r[0]
@@ -313,7 +313,7 @@ class App:
         return self.__route_cache[path]
 
     @classmethod
-    def route(cls, url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, f: Callable = None):
+    def route(cls, url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, disable_default_errors: Optional[Iterable[int]] = None, f: Callable = None):
         """Handles adding function to urls"""
 
         def decorated(func) -> partial:
@@ -333,6 +333,7 @@ class App:
                 func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
                 func.route_name = route_name
                 func.cache = []
+                func.disable_default_errors = set(disable_default_errors) or set()
                 cls._urls[route_name] = func
             return partial(func)
 

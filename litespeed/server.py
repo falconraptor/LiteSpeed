@@ -333,7 +333,7 @@ class App:
                 func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
                 func.route_name = route_name
                 func.cache = []
-                func.disable_default_errors = set(disable_default_errors) or set()
+                func.disable_default_errors = set(disable_default_errors) if disable_default_errors else set()
                 cls._urls[route_name] = func
             return partial(func)
 

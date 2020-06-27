@@ -146,7 +146,7 @@ class App:
         try:
             if isinstance(f, bool):
                 if 404 in self.error_routes:
-                    result = self.error_routes[404](env, *f[1], **f[2])
+                    result = self.error_routes[404](env)
                 else:
                     start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
                     return [b'']

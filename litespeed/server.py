@@ -14,7 +14,10 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
+from os import execvp, stat, walk
 from socketserver import ThreadingTCPServer
+from threading import Thread
+from time import sleep
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 from urllib.parse import parse_qs, unquote_plus
 from wsgiref.handlers import SimpleHandler
@@ -104,7 +107,7 @@ class WebServer(ThreadingTCPServer):
             client['handler'].send_json(obj)
 
     def serve(self):
-        print('Server Started on', f'{self.server_address}')
+        print(f'Server Started on {self.server_address}')
         try:
             self.serve_forever(.1)
         except KeyboardInterrupt:
@@ -146,7 +149,9 @@ class App:
         try:
             if isinstance(f, bool):
                 if 404 in self.error_routes:
-                    result = self.error_routes[404](env)
+                    r = self._handle_result(self.error_routes[404](env), headers, cookie, env)
+                    start_response(*r[1:])
+                    return r[0]
                 else:
                     start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
                     return [b'']

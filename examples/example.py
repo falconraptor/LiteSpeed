@@ -86,7 +86,7 @@ def auth(f):  # example an auth decorator. usage "@route() \n @auth \n def _____
     def wrapped(*args, **kwargs):
         request = kwargs.get('request', args[0] if args else Request())  # get request args otherwise use blank data (only gets correct args when doing "@route() \n @auth" otherwise "@auth \n @route()" it will not have the request argument
         if 'auth' not in request.COOKIE or request.COOKIE['auth'].value not in set():
-            return '', 303, {'Location': '/login/?next=' + request.PATH_INFO}  # should change /login/?next= to the url of login for you application
+            return '', 303, {'Location': f'/login/?next={request.PATH_INFO}'}  # should change /login/?next= to the url of login for you application
         return f(*args, **kwargs)
 
     wrapped.__name__ = f.__name__  # for if there is an error in the wrapped function, without it the exception would say the error is in a function named "wrapped"

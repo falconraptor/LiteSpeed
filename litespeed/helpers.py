@@ -8,13 +8,14 @@ from litespeed.utils import Request
 
 
 def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Optional[Union[List[str], str]] = None, status_override: int = None) -> Tuple[bytes, int, Dict[str, str]]:
-    """Send a file to the client, replacing ~~ controls to help with rendering blocks.
-    Allows for ~~extends [file]~~, ~~includes [file]~~, and content blocks <~~[name]~~>[content]</~~[name]~~>.
-    Extends will inject the blocks from this file to the one specified.
-    Includes will paste the specified file in that spot.
-    Contect blocks can be specified by ~~[name]~~ and used in files that extend <~~[name]~~>[content]</~~[name]~~>.
+    """Send a file to the client, replacing ~~ controls to help with rendering blocks.\n
+    Allows for ~~extends [file]~~, ~~includes [file]~~, and content blocks <~~[name]~~>[content]</~~[name]~~>.\n
+    Extends will inject the blocks from this file to the one specified.\n
+    Includes will paste the specified file in that spot.\n
+    Contect blocks can be specified by ~~[name]~~ and used in files that extend <~~[name]~~>[content]</~~[name]~~>.\n
     Also allows for pure python by doing ~~[python code that returns / is a string]~~
-    :returns:Tuple[bytes, int, Dict[str, str]] """
+
+    :returns:Tuple[bytes, int, Dict[str, str]]"""
     if data is None:
         data = {}
     if files is None:
@@ -52,8 +53,8 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
 
 
 def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = None, status_override: int = None) -> Tuple[bytes, int, Dict[str, str]]:
-    """Send a file to the client.
-    Allows for cache and header specification. Also allows to return a different _status code than 200
+    """Send a file to the client.\n
+    Allows for cache and header specification. Also allows to return a different _status code than 200\n
     :returns:Tuple[bytes, int, Dict[str, str]]"""
     file = file.replace('../', '')  # prevent serving files outside of current / specified dir (prevents download of all system files)
     if headers is None:

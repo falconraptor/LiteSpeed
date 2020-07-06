@@ -11,7 +11,7 @@ import requests
 from websocket import WebSocket
 
 from examples import example
-from litespeed import App
+from litespeed import App, start_server
 
 
 @pytest.fixture
@@ -25,7 +25,7 @@ def _server():
             s.bind(('', 0))
             s.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
             _server.port = s.getsockname()[1]
-        s = example.start_server(serve=False, port=_server.port)
+        s = start_server(serve=False, port=_server.port)
         t = Thread(target=s.serve_forever, daemon=True)
         t.start()
         while True:

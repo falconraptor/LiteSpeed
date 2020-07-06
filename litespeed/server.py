@@ -14,10 +14,7 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
-from os import execvp, stat, walk
 from socketserver import ThreadingTCPServer
-from threading import Thread
-from time import sleep
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 from urllib.parse import parse_qs, unquote_plus
 from wsgiref.handlers import SimpleHandler
@@ -34,7 +31,7 @@ class WebServer(ThreadingTCPServer):
     daemon_threads = True
     clients, handlers = {}, {}
     id_counter = 0
-    functions = {'new': [], 'message': [], 'left': []}
+    websocket_handlers = {'new': [], 'message': [], 'left': []}
 
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate: bool = True):
         super().__init__(server_address, RequestHandlerClass, bind_and_activate)
@@ -48,7 +45,7 @@ class WebServer(ThreadingTCPServer):
     def attach_websocket_handler(cls, type: str, function: Callable[[dict, ThreadingTCPServer, Optional[str]], None]):
         if type not in {'new', 'message', 'left'}:
             raise ValueError
-        cls.functions[type].append(function)
+        cls.websocket_handlers[type].append(function)
 
     @classmethod
     def setup_env(cls, port: int):
@@ -87,7 +84,7 @@ class WebServer(ThreadingTCPServer):
                 del self.handlers[client['handler_id']]
 
     def handle(self, client, type: str, msg=None):
-        for f in self.functions[type]:
+        for f in self.websocket_handlers[type]:
             f(client, self, *([msg] if msg else []))
 
     @staticmethod
@@ -148,29 +145,16 @@ class App:
         called = False
         try:
             if isinstance(f, bool):
-                if 404 in self.error_routes:
-                    r = self._handle_result(self.error_routes[404](env), headers, cookie, env)
-                    start_response(*r[1:])
-                    return r[0]
-                else:
-                    start_response('404 Not Found', [('Content-Type', 'text/public; charset=utf-8')])
-                    return [b'']
-            if path[-1:] != '/' and not f[0].no_end_slash:  # auto rediects to url that ends in / if no_end_slash is False
-                if 307 in self.error_routes:
-                    result = self.error_routes[307](env, *f[1], **f[2])
-                else:
-                    start_response('307 Moved Permanently', [('Location', f'{path}/')])
-                    return [b'']
-            r = self._handle_cors(f, headers, env)
-            if ('*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods) or not r:  # checks for allowed methods
-                if 405 in self.error_routes:
-                    result = self.error_routes[405](env, *f[1], **f[2])
-                else:
-                    start_response('405 Method Not Allowed', [('Content-Type', 'text/public; charset=utf-8')])
-                    return [b'']
+                result = self.error_routes.get(404, (lambda e: (b'', 404, {'Content-Type': 'text/public'})))(env)
+            if path[-1:] != '/' and not f[0].no_end_slash and 'result' not in locals():  # auto rediects to url that ends in / if no_end_slash is False
+                result = self.error_routes.get(307, (lambda e, *a, **k: (b'', 307, {'Location': f'{path}/'})))(env, *f[1], **f[2])
             if 'result' not in locals():
-                result = f[0](env, *f[1], **f[2])
-                called = True
+                r = self._handle_cors(f, headers, env)
+                if ('*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods) or not r:  # checks for allowed methods
+                    result = self.error_routes.get(405, (lambda e, *a, **k: (b'', 405, {'Content-Type': 'text/public'})))(env, *f[1], **f[2])
+                else:
+                    result = f[0](env, *f[1], **f[2])
+                    called = True
         except Exception:
             result = self.error_routes[500](env, *f[1], **f[2])
         r = self._handle_result(result, headers, cookie, env)
@@ -181,14 +165,15 @@ class App:
         return r[0]
 
     @classmethod
-    def register_error_route(cls, code: int, function: Callable):
-        cls.error_routes[code] = function
+    def register_error_page(cls, function: Callable = None, code: int = None):
+        assert code is not None
 
-    @classmethod
-    def register_error_page(cls, code: int):
-        def _wrapped(f: Callable):
-            cls.register_error_route(code, f)
-            return f
+        def _wrapped(function: Callable):
+            cls.error_routes[code] = function
+            return function
+
+        if function:
+            return _wrapped(function)
         return _wrapped
 
     @staticmethod
@@ -224,45 +209,57 @@ class App:
         else:
             return _check_cors()
 
-    @staticmethod
-    def add_websocket_handler(type: str, function: Callable[[dict, WebServer, Optional[str]], None]):
-        if type not in {'new', 'message', 'left'}:
-            raise ValueError
-        WebServer.functions[type].append(function)
-
     @classmethod
-    def add_websocket(cls, type: str):
+    def add_websocket(cls, function: Callable[[dict, WebServer, Optional[str]], None] = None, type: str = None):
         if type not in {'new', 'message', 'left'}:
             raise ValueError
 
-        def _wrapped(f: Callable[[dict, WebServer, Optional[str]], None]):
-            cls.add_websocket_handler(type, f)
-            return f
-        return _wrapped
+        def _wrapped(function: Callable[[dict, WebServer, Optional[str]], None]):
+            WebServer.websocket_handlers[type].append(function)
+            return function
 
-    @staticmethod
-    def _handle_result_process_headers(result, headers: dict, request_headers):
-        if isinstance(request_headers, dict):
-            headers.update(request_headers)
-        elif isinstance(request_headers, tuple):
-            headers.update(dict(request_headers))
-        elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
-            headers.update(dict(result))
+        if function:
+            return _wrapped(function)
+        return _wrapped
 
     def _handle_result(self, result, headers: dict, cookie: set, env: Request) -> Tuple[List[bytes], str, List[tuple]]:
         body = ''
         status = '200 OK'
+
+        def _process_headers(request_headers):
+            if isinstance(request_headers, dict):
+                headers.update(request_headers)
+            elif isinstance(request_headers, tuple):
+                headers.update(dict(request_headers))
+            elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
+                headers.update(dict(result))
+
+        def _handle_status(_status):
+            nonlocal status
+            if not _status:
+                status = '200 OK'
+            else:
+                status = self._status[_status] if isinstance(_status, int) else _status if not isinstance(_status, HTTPStatus) else f'{_status.value} {_status.phrase}'
+
+        def _handle_compression():
+            nonlocal body
+            body_len = len(body[0])
+            if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and body_len > 200 and 'image' not in headers.get('Content-Type', '').lower():
+                compressed_body = self.compress_string(body[0])
+                compressed_len = len(compressed_body)
+                if compressed_len < body_len:
+                    body = [compressed_body]
+                headers['Content-Length'] = str(compressed_len)
+                headers['Content-Encoding'] = 'gzip'
+
         if result:  # if result is not None parse for body, _status, headers
             if isinstance(result, (tuple, type(namedtuple), list)):
                 l_result = len(result)
                 body = result[0] if l_result <= 3 else result
                 if 3 >= l_result > 1:
-                    if not result[1]:
-                        status = '200 OK'
-                    else:
-                        status = self._status[result[1]] if isinstance(result[1], int) else result[1] if not isinstance(result[1], HTTPStatus) else f'{result[1].value} {result[1].phrase}'
+                    _handle_status(result[1])
                     if l_result > 2 and result[2]:
-                        self._handle_result_process_headers(result, headers, result[2])
+                        _process_headers(result[2])
                 if callable(body):
                     body = body()
                 elif isinstance(body, dict):
@@ -275,10 +272,9 @@ class App:
                     body = result['body']
                     if callable(body):
                         body = body()
-                if '_status' in result:
-                    status = self._status[result['_status']] if isinstance(result['_status'], int) else result['_status'] if not isinstance(result['_status'], HTTPStatus) else f'{result["_status"].value} {result["_status"].phrase}'
+                _handle_status(result.get('_status'))
                 if 'headers' in result:
-                    self._handle_result_process_headers(result, headers, result['headers'])
+                    _process_headers(result['headers'])
                 if not (body or status != '200 OK'):
                     body = json.dumps(result, default=json_serial).encode()
                     headers['Content-Type'] = 'application/json; charset=utf-8'
@@ -290,14 +286,7 @@ class App:
             headers['Content-Type'] = 'text/html; charset=utf-8'
         body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else [str(body).encode()] if isinstance(body, int) else body
         if body:
-            body_len = len(body[0])
-            if 'gzip' in env.get('ACCEPT_ENCODING', '').lower() and body_len > 200 and 'image' not in headers.get('Content-Type', '').lower():
-                compressed_body = self.compress_string(body[0])
-                compressed_len = len(compressed_body)
-                if compressed_len < body_len:
-                    body = [compressed_body]
-                headers['Content-Length'] = str(compressed_len)
-                headers['Content-Encoding'] = 'gzip'
+            _handle_compression()
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 
     def _handle_route_cache(self, path: str) -> Union[bool, Callable]:
@@ -318,33 +307,37 @@ class App:
         return self.__route_cache[path]
 
     @classmethod
-    def route(cls, url: Optional[str] = None, route_name: Optional[str] = None, methods: Union[Iterable, str] = '*', cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, disable_default_errors: Optional[Iterable[int]] = None, f: Callable = None):
+    def route(cls, url: Optional[str] = None, methods: Union[Iterable, str] = '*', function: Callable = None, cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, disable_default_errors: Optional[Iterable[int]] = None):
         """Handles adding function to urls"""
 
         def decorated(func) -> partial:
-            nonlocal url, route_name
+            nonlocal url
             if url is None:
                 url = (func.__module__.replace('.', '/') + '/').replace('__main__/', '') + (func.__name__ + '/').replace('index/', '')
             if not url or (url[-1] != '/' and '.' not in url[-5:] and not no_end_slash):
                 url = (url or '') + '/'
-            if route_name is None:
-                route_name = url
-            if route_name not in cls._urls:
+            if url not in cls._urls:
                 func.no_end_slash = no_end_slash
                 func.url = url
                 func.re = re.compile(url)
                 func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.split(','))
                 func.cors = None if not cors else {c.lower() for c in cors} if isinstance(cors, (list, set, dict, tuple)) else {c for c in cors.lower().strip().split(',') if c}
                 func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
-                func.route_name = route_name
                 func.cache = []
                 func.disable_default_errors = set(disable_default_errors) if disable_default_errors else set()
-                cls._urls[route_name] = func
+                cls._urls[url] = func
             return partial(func)
 
-        if f:
-            return decorated(f)
+        if function:
+            return decorated(function)
         return decorated
+
+    @classmethod
+    def clear_route_cache(cls, path=None):
+        if path:
+            del cls.__route_cache[path]
+        else:
+            cls.__route_cache.clear()
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -395,8 +388,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                             file.seek(0)
                     if not content:
                         if not name:
-                            name = re_name.findall(decoded)
-                            name = name[0] if name else ''
+                            name = (re_name.findall(decoded) or [''])[0]
                         if not filename:
                             filename = re_filename.findall(decoded)
                             if filename:
@@ -476,7 +468,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not self.parse_request():
             return
         env = self.get_environ()
-        if any(self.server.functions.values()):  # only handshakes websockets if there is a function to handle them
+        if any(self.server.websocket_handlers.values()):  # only handshakes websockets if there is a function to handle them
             self.handshake(env)
             if self.valid_client:
                 while self.keep_alive:

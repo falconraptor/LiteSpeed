@@ -16,7 +16,7 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
         data = {}
         result = App()({'PATH_INFO': url[:-1], 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET', 'GET': {}, 'FILES': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         assert result[0] == b''
-        assert data['status'] == '307 Moved Permanently'
+        assert data['status'] == '307 Temporary Redirect'
         assert data['headers']['Location'] == url
     allowed_methods = {method.upper() for method in allowed_methods}
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):

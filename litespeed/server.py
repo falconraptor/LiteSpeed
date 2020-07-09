@@ -252,26 +252,29 @@ class App:
                 headers['Content-Length'] = str(compressed_len)
                 headers['Content-Encoding'] = 'gzip'
 
+        def _handle_body(_body):
+            nonlocal body
+            if callable(_body):
+                body = _body()
+            elif isinstance(_body, dict):
+                body = json.dumps(_body, default=json_serial).encode()
+                headers['Content-Type'] = 'application/json; charset=utf-8'
+            elif isinstance(_body, dict_keys):
+                body = list(_body)
+            else:
+                body = _body
+
         if result:  # if result is not None parse for body, _status, headers
             if isinstance(result, (tuple, type(namedtuple), list)):
                 l_result = len(result)
-                body = result[0] if l_result <= 3 else result
                 if 3 >= l_result > 1:
                     _handle_status(result[1])
                     if l_result > 2 and result[2]:
                         _process_headers(result[2])
-                if callable(body):
-                    body = body()
-                elif isinstance(body, dict):
-                    body = json.dumps(body, default=json_serial).encode()
-                    headers['Content-Type'] = 'application/json; charset=utf-8'
-                elif isinstance(body, dict_keys):
-                    body = list(body)
+                _handle_body(result[0] if l_result <= 3 else result)
             elif isinstance(result, dict):
                 if 'body' in result:
-                    body = result['body']
-                    if callable(body):
-                        body = body()
+                    _handle_body(result['body'])
                 _handle_status(result.get('_status'))
                 if 'headers' in result:
                     _process_headers(result['headers'])

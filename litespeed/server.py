@@ -146,7 +146,7 @@ class App:
         try:
             if isinstance(f, bool):
                 result = self.error_routes.get(404, (lambda e: (b'', 404, {'Content-Type': 'text/public'})))(env)
-            if path[-1:] != '/' and not f[0].no_end_slash and 'result' not in locals():  # auto rediects to url that ends in / if no_end_slash is False
+            if path[-1:] != '/' and 'result' not in locals() and not f[0].no_end_slash:  # auto rediects to url that ends in / if no_end_slash is False
                 result = self.error_routes.get(307, (lambda e, *a, **k: (b'', 307, {'Location': f'{path}/'})))(env, *f[1], **f[2])
             if 'result' not in locals():
                 r = self._handle_cors(f, headers, env)

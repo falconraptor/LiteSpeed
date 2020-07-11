@@ -155,3 +155,13 @@ def test_echo(server):
 
 def test_501(server):
     url_test('/examples/example/_501/', ('GET',), 501, b'This is a 501 error', port=server)
+
+
+def test_206():
+    with open('examples/media/206.txt', 'rb') as file:
+        # HACK we cannot specify passing in headers atm
+        # To get around this, we pass it as a GET parameter
+        expected_ouput = [file.read()]
+        headers = {'RANGE': f'bytes={0}-'}
+        url_test(f'/media/206.txt', ('GET',), 206, expected_ouput,
+                 requested_headers=headers)

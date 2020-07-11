@@ -109,6 +109,11 @@ def _501_error(request: Request, *args, **kwargs):
 def _501(request: Request):
     return '', 501
 
+@route(r'/media/([\w\s./]+)', methods=['GET'], no_end_slash=True)
+def media(request: Request):
+    range = request.get('RANGE')
+    return serve(f'examples/static/{file}',range=range)
+
 
 route(r'num/(?P<num>\d+)', function=test2)  # add function to routes without decorator: /num/[any number]/
 if __name__ == '__main__':

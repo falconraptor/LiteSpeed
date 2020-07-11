@@ -85,24 +85,27 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
             # We dont support multipart ranges
             if len(pairs) != 1:
                 return b'', 416, {}
+            #start and stop are INCLUSIVE
             start, stop = pairs[0]
             if start is None:
+                # stop is actually # of bytes to read from end
+                # get correct start and stop
                 start = content_size - stop  # read last # of bytes
-                stop = content_size  # read to end of file
+                stop = content_size-1  # read to end of file
             elif stop is None:
                 if max_bytes_per_request is None:
-                    stop = content_size  # read until EOF
+                    stop = content_size-1  # read until EOF
                 else:
                     # read max number of bytes per request
                     # OR read to end of file
-                    stop = min(start+max_bytes_per_request, content_size)
+                    stop = min(start+max_bytes_per_request-1, content_size-1)
 
             # validate range
             if start < 0 or start > stop or stop > content_size:
                 return b'', 416, {}
-            read_len = stop - start
+            read_len = stop - start + 1 #499-0 is only 499 bytes, add 1 for 500 bytes
             lines = _in.read(read_len)
-            headers['Content-Range'] = f"{unit} {start}-{stop-1}/{content_size}"
+            headers['Content-Range'] = f"{unit} {start}-{stop}/{content_size}"
             headers['Cache-Length'] = read_len
             if status_override is None:
                 status_override = 206

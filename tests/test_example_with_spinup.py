@@ -160,8 +160,8 @@ def test_501(server):
 def test_206(server):
     with open('examples/media/206.txt', 'rb') as file:
         body = file.read()
-    url_test('/media/206.txt', ('GET',), 416, b'', method_kwargs={'headers': {'RANGE': 'chars=0-8'}})
-    url_test('/media/206.txt', ('GET',), 416, b'', method_kwargs={'headers': {'RANGE': 'bytes=0-8,7-16'}})
+    url_test('/media/206.txt', ('GET',), 416, b'', method_kwargs={'headers': {'RANGE': 'chars=0-8'}}, port=server)
+    url_test('/media/206.txt', ('GET',), 416, b'', method_kwargs={'headers': {'RANGE': 'bytes=0-8,7-16'}}, port=server)
     for range, result in (('bytes=0-8', body[:8]), ('bytes=8-16', body[8:16]), ('bytes=16-32', body[16:32])):
         url_test('/media/206.txt', ('GET',), 206, result, method_kwargs={'headers': {'RANGE': range}}, port=server)
     result = requests.get(f'http://127.0.0.1:{server}/media/206.txt', headers={'RANGE': 'bytes=0-8,16-32'})

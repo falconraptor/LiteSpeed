@@ -59,7 +59,7 @@ def test_another():
 def test_json():
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
         url_test('/examples/example/json/', (method,), 200, [
-            f'{{"PATH_INFO": "/examples/example/json/", "COOKIE": {{}}, "REQUEST_METHOD": "{method}", "{method}": {{}}, "FILES": {{}}}}'.encode()],
+            f'{{"HEADERS": {{}}, "PATH_INFO": "/examples/example/json/", "COOKIE": {{}}, "REQUEST_METHOD": "{method}", "{method}": {{}}, "FILES": {{}}}}'.encode()],
                  skip_405=True)
 
 

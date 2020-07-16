@@ -5,4 +5,4 @@ dist/
 junit/
 LiteSpeed.egg-info/
 build/
-venv/*
+venv/

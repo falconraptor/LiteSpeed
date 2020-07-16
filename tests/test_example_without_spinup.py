@@ -16,24 +16,14 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
         requested_headers = {}
     if url[-1:] == '/' and not expected_status == 404:
         data = {}
-        result = App()(
-            {'HEADERS': requested_headers,
-             'PATH_INFO': url[:-1],
-             'COOKIE': SimpleCookie(),
-             'REQUEST_METHOD': 'GET',
-             'GET': {}, 'FILES': {}},
-            lambda status, headers: data.update({'status': status, 'headers': dict(headers)})
-        )
+        result = App()({'HEADERS': requested_headers, 'PATH_INFO': url[:-1], 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET', 'GET': {}, 'FILES': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         assert result[0] == b''
         assert data['status'] == '307 Temporary Redirect'
         assert data['headers']['Location'] == url
     allowed_methods = {method.upper() for method in allowed_methods}
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
         data = {}
-        result = App()(
-            {'HEADERS': requested_headers, 'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method,
-             method: method_params, 'FILES': {}},
-            lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
+        result = App()({'HEADERS': requested_headers, 'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method, method: method_params, 'FILES': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         if method in allowed_methods or '*' in allowed_methods:
             assert result == expected_result
             assert data['status'] == App._status[expected_status]
@@ -58,9 +48,7 @@ def test_another():
 
 def test_json():
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
-        url_test('/examples/example/json/', (method,), 200, [
-            f'{{"HEADERS": {{}}, "PATH_INFO": "/examples/example/json/", "COOKIE": {{}}, "REQUEST_METHOD": "{method}", "{method}": {{}}, "FILES": {{}}}}'.encode()],
-                 skip_405=True)
+        url_test('/examples/example/json/', (method,), 200, [f'{{"HEADERS": {{}}, "PATH_INFO": "/examples/example/json/", "COOKIE": {{}}, "REQUEST_METHOD": "{method}", "{method}": {{}}, "FILES": {{}}}}'.encode()], skip_405=True)
 
 
 def test_test2():
@@ -72,13 +60,11 @@ def test_test2():
 
 
 def test_index():
-    url_test('/examples/example/', ('*',), 200,
-             [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
+    url_test('/examples/example/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
 
 
 def test_index2():
-    url_test('/examples/example/index2/', ('*',), 200,
-             [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
+    url_test('/examples/example/index2/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
 
 
 def test_article():
@@ -90,8 +76,7 @@ def test_article():
 
 def test_readme():
     with open('README.md', 'rb') as readme:
-        url_test('/examples/example/readme/', ('*',), 200, [readme.read()],
-                 {'Content-Type': mimetypes.guess_type('README.md')[0] or 'application/octet-stream'})
+        url_test('/examples/example/readme/', ('*',), 200, [readme.read()], {'Content-Type': mimetypes.guess_type('README.md')[0] or 'application/octet-stream'})
 
 
 def test_file():
@@ -101,8 +86,7 @@ def test_file():
 
 def test_render():
     with open('README.md', 'rt') as readme:
-        url_test('/examples/example/render_example/', ('GET',), 200,
-                 [readme.read().replace('~~test~~', 'pytest').encode()], method_params={'test': 'pytest'})
+        url_test('/examples/example/render_example/', ('GET',), 200, [readme.read().replace('~~test~~', 'pytest').encode()], method_params={'test': 'pytest'})
 
 
 def test_upload():
@@ -112,8 +96,7 @@ def test_upload():
 
 def test_css():
     with open('examples/static/test.css', 'rb') as file:
-        url_test('/examples/example/css/', ('GET',), 200, [file.read()],
-                 {'Content-Type': mimetypes.guess_type('examples/static/test.css')[0]})
+        url_test('/examples/example/css/', ('GET',), 200, [file.read()], {'Content-Type': mimetypes.guess_type('examples/static/test.css')[0]})
 
 
 def test_static():
@@ -127,8 +110,7 @@ def test_501():
 
 def test_206():
     with open('examples/media/206.txt', 'rb') as file:
-        # HACK we cannot specify passing in headers atm
-        # To get around this, we pass it as a GET parameter
-        expected_ouput = [file.read()]
-        headers = {'RANGE': f'bytes={0}-'}
-        url_test(f'/media/206.txt', ('GET',), 206, expected_ouput, requested_headers=headers)
+        body = [file.read()]
+    url_test(f'/media/206.txt', ('GET',), 200, body, requested_headers={'RANGE': 'bytes=0-'})  # test for whole file
+    for range, result in (('bytes=0-8', [body[0][:8]]), ('bytes=8-16', [body[0][8:16]]), ('bytes=16-32', [body[0][16:32]])):
+        url_test(f'/media/206.txt', ('GET',), 206, result, requested_headers={'RANGE': range})

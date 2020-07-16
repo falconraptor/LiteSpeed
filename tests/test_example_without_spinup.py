@@ -113,7 +113,7 @@ def test_206():
         body = [file.read()]
     url_test('/media/206.txt', ('GET',), 416, [b''], requested_headers={'RANGE': 'chars=0-8'})
     url_test('/media/206.txt', ('GET',), 416, [b''], requested_headers={'RANGE': 'bytes=0-8,7-16'})
-    for range, result in (('bytes=0-8', [body[0][:8]]), ('bytes=8-16', [body[0][8:16]]), ('bytes=16-32', [body[0][16:32]])):
+    for range, result in (('bytes=0-8', [body[0][:8 + 1]]), ('bytes=8-16', [body[0][8:16 + 1]]), ('bytes=16-32', [body[0][16:32 + 1]])):
         url_test('/media/206.txt', ('GET',), 206, result, requested_headers={'RANGE': range}, expected_headers={'Content-Range': range.replace('=', ' ') + f'/{len(body[0])}'})
     data = {}
     result = App()({'HEADERS': {'RANGE': 'bytes=0-8,16-32'}, 'PATH_INFO': '/media/206.txt', 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET', 'GET': {}, 'FILES': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
@@ -138,6 +138,6 @@ def test_206():
             assert int(range[1].decode()) == len(body[0])
             after = 3
         elif after == 3:
-            assert line == body[0][start:stop]
+            assert line == body[0][start:stop + 1]
             after = 0
     assert line == f'--{boundary}--'.encode()

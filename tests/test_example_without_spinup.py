@@ -5,9 +5,7 @@ from typing import Iterable
 from examples.example import App
 
 
-def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: Iterable[bytes],
-             expected_headers: dict = None, skip_405: bool = False, method_params: dict = None,
-             requested_headers: dict = None):
+def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: Iterable[bytes], expected_headers: dict = None, skip_405: bool = False, method_params: dict = None, requested_headers: dict = None):
     if url[-1:] != '/' and '.' not in url[-5:] and '?':
         url += '/'
     if not expected_headers:
@@ -19,8 +17,13 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
     if url[-1:] == '/' and not expected_status == 404:
         data = {}
         result = App()(
-            {'HEADER': requested_headers, 'PATH_INFO': url[:-1], 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET',
-             'GET': {}, 'FILES': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
+            {'HEADERS': requested_headers,
+             'PATH_INFO': url[:-1],
+             'COOKIE': SimpleCookie(),
+             'REQUEST_METHOD': 'GET',
+             'GET': {}, 'FILES': {}},
+            lambda status, headers: data.update({'status': status, 'headers': dict(headers)})
+        )
         assert result[0] == b''
         assert data['status'] == '307 Temporary Redirect'
         assert data['headers']['Location'] == url
@@ -28,7 +31,7 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, exp
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
         data = {}
         result = App()(
-            {'HEADER': requested_headers, 'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method,
+            {'HEADERS': requested_headers, 'PATH_INFO': url, 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': method,
              method: method_params, 'FILES': {}},
             lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
         if method in allowed_methods or '*' in allowed_methods:
@@ -128,5 +131,4 @@ def test_206():
         # To get around this, we pass it as a GET parameter
         expected_ouput = [file.read()]
         headers = {'RANGE': f'bytes={0}-'}
-        url_test(f'/media/206.txt', ('GET',), 206, expected_ouput,
-                 requested_headers=headers)
+        url_test(f'/media/206.txt', ('GET',), 206, expected_ouput, requested_headers=headers)

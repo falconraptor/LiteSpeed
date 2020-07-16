@@ -106,7 +106,7 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
             read_len = stop - start + 1 #499-0 is only 499 bytes, add 1 for 500 bytes
             lines = _in.read(read_len)
             headers['Content-Range'] = f"{unit} {start}-{stop}/{content_size}"
-            headers['Cache-Length'] = read_len
+            headers['Cache-Length'] = str(read_len)
             if status_override is None:
                 status_override = 206
 
@@ -136,7 +136,7 @@ def read_range(range: str) -> Tuple[str, List[Tuple[Union[int, None], Union[int,
     pairs = []
     for pair_str in split_on_pairs:
         split_on_range = pair_str.split('-')
-        start, stop = None
+        start, stop = None, None
         if len(split_on_range[0]) > 0:
             start = int(split_on_range[0])
         if len(split_on_range[1]) > 0:

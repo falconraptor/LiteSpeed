@@ -100,7 +100,7 @@ def echo(client: dict, server: WebServer, msg: str):
     # there is also a send_all and send_json_all functions in server
 
 
-@register_error_page(code=501)
+@register_error_page(code=501)  # code is any http status code int, preferably an error code (401, 404, 500, 501, etc...)
 def _501_error(request: Request, *args, **kwargs):
     return 'This is a 501 error', 501
 
@@ -108,6 +108,11 @@ def _501_error(request: Request, *args, **kwargs):
 @route(methods=['GET'])
 def _501(request: Request):
     return '', 501
+
+
+@route(r'/media/([\w\s./]+)', methods=['GET'], no_end_slash=True)  # Example for serving partial content / 206 Requests
+def media(request: Request, file: str):
+    return serve(f'examples/media/{file}', range=request.HEADERS.get('RANGE'))
 
 
 route(r'num/(?P<num>\d+)', function=test2)  # add function to routes without decorator: /num/[any number]/

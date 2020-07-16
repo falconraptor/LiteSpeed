@@ -97,23 +97,18 @@ def _handle_206(file: str, _in: BinaryIO, headers: Dict[str, str] = None, range:
             if old_start < start < old_stop or old_start < stop < old_stop:
                 headers['Content-Range'] = f'*/{content_size}'
                 return b'', 416
-        if max_bytes_per_request is not None:
-            stop = min(start + max_bytes_per_request, stop)
-        ranges.append((start, stop))
         if start is None:
             start = content_size - stop
-            if max_bytes_per_request is not None:
-                stop = min(start + max_bytes_per_request, stop)
         elif stop is None:
-            if max_bytes_per_request is None:
-                stop = content_size
-            else:
-                stop = min(start + max_bytes_per_request, content_size)
-        if start < 0 or start > stop or stop > content_size:  # validate range
+            stop = content_size
+        if max_bytes_per_request is not None:
+            stop = min(start + max_bytes_per_request, min(stop, content_size - 1))
+        if start < 0 or start > stop:  # validate range
             headers['Content-Range'] = f'*/{content_size}'
             return b'', 416
+        ranges.append((start, stop))
         _in.seek(start)
-        size = stop - start
+        size = stop - start + 1
         result.append((_in.read(size), f"{unit} {start}-{stop}/{content_size}"))
     if len(result) > 1:
         boundary = token_hex(7)

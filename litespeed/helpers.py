@@ -2,7 +2,7 @@ import mimetypes
 import re
 from os.path import exists, getsize
 from secrets import token_hex
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, BinaryIO, Dict, List, Optional, Tuple, Union
 
 from litespeed.server import App
 from litespeed.utils import Request
@@ -73,45 +73,7 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
         if range is None:  # 200 request
             lines = _in.read()
         else:  # 206 Request
-            unit, pairs = read_range(range)
-            content_size = getsize(file)
-            if unit != "bytes":
-                return b'', 416, {'Content-Range': f'*/{content_size}'}  # RANGE_NOT_SATISFIABLE
-            ranges = []
-            result = []
-            for start, stop in pairs:  # get data for each range specified
-                if start is None and stop is None:
-                    return b'', 416, {'Content-Range': f'*/{content_size}'}
-                for old_start, old_stop in ranges:  # check range overlap and throw error if true
-                    if old_start < start < old_stop or old_start < stop < old_stop:
-                        return b'', 416, {'Content-Range': f'*/{content_size}'}
-                if max_bytes_per_request is not None:
-                    stop = min(start + max_bytes_per_request, stop)
-                ranges.append((start, stop))
-                if start is None:
-                    start = content_size - stop
-                    if max_bytes_per_request is not None:
-                        stop = min(start + max_bytes_per_request, stop)
-                elif stop is None:
-                    if max_bytes_per_request is None:
-                        stop = content_size
-                    else:
-                        stop = min(start + max_bytes_per_request, content_size)
-                if start < 0 or start > stop or stop > content_size:  # validate range
-                    return b'', 416, {'Content-Range': f'*/{content_size}'}
-                _in.seek(start)
-                size = stop - start
-                result.append((_in.read(size), f"{unit} {start}-{stop}/{content_size}"))
-            if status_override is None:
-                status_override = 206
-            if len(result) > 1:
-                boundary = token_hex(7)
-                content = headers['Content-Type']
-                headers['Content-Type'] = f'multipart/byteranges; boundary={boundary}'
-                lines = '\n'.join(f'--{boundary}\nContent-Type: {content}\nContent-Range: {r[1]}\n\n{r[0].decode() if content.startswith("text/") else r[0].hex()}' for r in result) + f'\n--{boundary}--'
-            else:
-                lines, range = result[0]
-                headers['Content-Range'] = range
+            lines, status_override = _handle_206(file, _in, headers, range, max_bytes_per_request)
     if cache_age > 0:
         headers['Cache-Control'] = f'max-age={cache_age}'
     elif not cache_age and file.split('.')[-1] != 'html' and not App.debug:  # if cache_age is not specified and not an html file and not debug then autoset cache_age to 1 hour
@@ -119,7 +81,52 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
     return lines, status_override or 200, headers
 
 
-def read_range(range: str) -> Tuple[str, List[Tuple[Union[int, None], Union[int, None]]]]:
+def _handle_206(file: str, _in: BinaryIO, headers: Dict[str, str] = None, range: str = None, max_bytes_per_request: int = None) -> Tuple[bytes, int]:
+    unit, pairs = _read_range(range)
+    content_size = getsize(file)
+    if unit != "bytes":
+        headers['Content-Range'] = f'*/{content_size}'
+        return b'', 416  # RANGE_NOT_SATISFIABLE
+    ranges = []
+    result = []
+    for start, stop in pairs:  # get data for each range specified
+        if start is None and stop is None:
+            headers['Content-Range'] = f'*/{content_size}'
+            return b'', 416
+        for old_start, old_stop in ranges:  # check range overlap and throw error if true
+            if old_start < start < old_stop or old_start < stop < old_stop:
+                headers['Content-Range'] = f'*/{content_size}'
+                return b'', 416
+        if max_bytes_per_request is not None:
+            stop = min(start + max_bytes_per_request, stop)
+        ranges.append((start, stop))
+        if start is None:
+            start = content_size - stop
+            if max_bytes_per_request is not None:
+                stop = min(start + max_bytes_per_request, stop)
+        elif stop is None:
+            if max_bytes_per_request is None:
+                stop = content_size
+            else:
+                stop = min(start + max_bytes_per_request, content_size)
+        if start < 0 or start > stop or stop > content_size:  # validate range
+            headers['Content-Range'] = f'*/{content_size}'
+            return b'', 416
+        _in.seek(start)
+        size = stop - start
+        result.append((_in.read(size), f"{unit} {start}-{stop}/{content_size}"))
+    if len(result) > 1:
+        boundary = token_hex(7)
+        content = headers['Content-Type']
+        headers['Content-Type'] = f'multipart/byteranges; boundary={boundary}'
+        lines = '\n'.join(f'--{boundary}\nContent-Type: {content}\nContent-Range: {r[1]}\n\n{r[0].decode() if content.startswith("text/") else r[0].hex()}' for r in result) + f'\n--{boundary}--'
+    else:
+        lines, range = result[0]
+        headers['Content-Range'] = range
+    return lines, 206
+
+
+def _read_range(range: str) -> Tuple[str, List[Tuple[Union[int, None], Union[int, None]]]]:
     """Parses a range string.\n
     Separates the string into the unit, and the range pairs.\n
     A None value in the pair range specifies that the value was not given, this is expected behaviour.

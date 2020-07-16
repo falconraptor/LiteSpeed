@@ -111,6 +111,33 @@ def test_501():
 def test_206():
     with open('examples/media/206.txt', 'rb') as file:
         body = [file.read()]
-    url_test(f'/media/206.txt', ('GET',), 200, body, requested_headers={'RANGE': 'bytes=0-'})  # test for whole file
+    url_test('/media/206.txt', ('GET',), 416, [b''], requested_headers={'RANGE': 'chars=0-8'})
+    url_test('/media/206.txt', ('GET',), 416, [b''], requested_headers={'RANGE': 'bytes=0-8,7-16'})
     for range, result in (('bytes=0-8', [body[0][:8]]), ('bytes=8-16', [body[0][8:16]]), ('bytes=16-32', [body[0][16:32]])):
-        url_test(f'/media/206.txt', ('GET',), 206, result, requested_headers={'RANGE': range})
+        url_test('/media/206.txt', ('GET',), 206, result, requested_headers={'RANGE': range}, expected_headers={'Content-Range': range.replace('=', ' ') + f'/{len(body[0])}'})
+    data = {}
+    result = App()({'HEADERS': {'RANGE': 'bytes=0-8,16-32'}, 'PATH_INFO': '/media/206.txt', 'COOKIE': SimpleCookie(), 'REQUEST_METHOD': 'GET', 'GET': {}, 'FILES': {}}, lambda status, headers: data.update({'status': status, 'headers': dict(headers)}))
+    assert data['status'] == App._status[206]
+    content = data['headers']['Content-Type'].split(';', 1)
+    assert content[0] == 'multipart/byteranges'
+    boundary = content[1].split('=', 1)[1]
+    after = 0
+    start, stop = 0, 0
+    for line in result[0].split(b'\n'):
+        if not line:
+            continue
+        if line == f'--{boundary}'.encode():
+            after = 1
+        elif after == 1:
+            assert b'Content-Type: ' in line
+            after = 2
+        elif after == 2:
+            assert b'Content-Range: bytes ' in line
+            range = line.split(b'bytes ', 1)[1].split(b'/', 1)
+            start, stop = [int(_) for _ in range[0].split(b'-', 1)]
+            assert int(range[1].decode()) == len(body[0])
+            after = 3
+        elif after == 3:
+            assert line == body[0][start:stop]
+            after = 0
+    assert line == f'--{boundary}--'.encode()

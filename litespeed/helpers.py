@@ -1,6 +1,6 @@
 import mimetypes
 import re
-from os.path import exists
+from os.path import exists, getsize
 from secrets import token_hex
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -53,8 +53,7 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
     return lines, status_override or status, headers
 
 
-# Supports 206 Range requests
-# DOES NOT SUPPORT 206 If-Range requests or Multipart Ranges
+# DOES NOT SUPPORT 206 If-Range requests
 def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = None, status_override: int = None, range: str = None, max_bytes_per_request: int = None) -> Tuple[bytes, int, Dict[str, str]]:
     """Send a file to the client.\n
     Allows for cache and header specification. Also allows to return a different _status code than 200\n
@@ -75,27 +74,31 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
             lines = _in.read()
         else:  # 206 Request
             unit, pairs = read_range(range)
+            content_size = getsize(file)
             if unit != "bytes":
-                return b'', 416, {}  # RANGE_NOT_SATISFIABLE
-            import os
-            content_size = os.path.getsize(file)
+                return b'', 416, {'Content-Range': f'*/{content_size}'}  # RANGE_NOT_SATISFIABLE
             ranges = []
             result = []
             for start, stop in pairs:  # get data for each range specified
+                if start is None and stop is None:
+                    return b'', 416, {'Content-Range': f'*/{content_size}'}
                 for old_start, old_stop in ranges:  # check range overlap and throw error if true
                     if old_start < start < old_stop or old_start < stop < old_stop:
-                        return b'', 416, {}
+                        return b'', 416, {'Content-Range': f'*/{content_size}'}
+                if max_bytes_per_request is not None:
+                    stop = min(start + max_bytes_per_request, stop)
                 ranges.append((start, stop))
                 if start is None:
                     start = content_size - stop
-                    stop = content_size
+                    if max_bytes_per_request is not None:
+                        stop = min(start + max_bytes_per_request, stop)
                 elif stop is None:
-                    if max_bytes_per_request is None:  # TODO ask
+                    if max_bytes_per_request is None:
                         stop = content_size
                     else:
                         stop = min(start + max_bytes_per_request, content_size)
-                if start < 0 or start > stop or stop > content_size or (start is None and stop is None):  # validate range
-                    return b'', 416, {}
+                if start < 0 or start > stop or stop > content_size:  # validate range
+                    return b'', 416, {'Content-Range': f'*/{content_size}'}
                 _in.seek(start)
                 size = stop - start
                 result.append((_in.read(size), f"{unit} {start}-{stop}/{content_size}"))
@@ -105,7 +108,10 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
                 boundary = token_hex(7)
                 content = headers['Content-Type']
                 headers['Content-Type'] = f'multipart/byteranges; boundary={boundary}'
-                lines = '\n'.join(f'--{boundary}\nContent-Type: {content}\nContent-Range: {r[1]}\n\n{r[0]}' for r in result) + f'--{boundary}--'
+                lines = '\n'.join(f'--{boundary}\nContent-Type: {content}\nContent-Range: {r[1]}\n\n{r[0].decode() if content.startswith("text/") else r[0].hex()}' for r in result) + f'\n--{boundary}--'
+            else:
+                lines, range = result[0]
+                headers['Content-Range'] = range
     if cache_age > 0:
         headers['Cache-Control'] = f'max-age={cache_age}'
     elif not cache_age and file.split('.')[-1] != 'html' and not App.debug:  # if cache_age is not specified and not an html file and not debug then autoset cache_age to 1 hour

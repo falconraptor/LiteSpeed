@@ -159,4 +159,33 @@ def test_501(server):
 
 def test_206(server):
     with open('examples/media/206.txt', 'rb') as file:
-        url_test(f'/media/206.txt', ('GET',), 206, file.read(), method_kwargs={'headers': {'RANGE': 'bytes=0-'}}, port=server)
+        body = file.read()
+    url_test('/media/206.txt', ('GET',), 416, b'', method_kwargs={'headers': {'RANGE': 'chars=0-8'}})
+    url_test('/media/206.txt', ('GET',), 416, b'', method_kwargs={'headers': {'RANGE': 'bytes=0-8,7-16'}})
+    for range, result in (('bytes=0-8', body[:8]), ('bytes=8-16', body[8:16]), ('bytes=16-32', body[16:32])):
+        url_test('/media/206.txt', ('GET',), 206, result, method_kwargs={'headers': {'RANGE': range}}, port=server)
+    result = requests.get(f'http://127.0.0.1:{server}/media/206.txt', headers={'RANGE': 'bytes=0-8,16-32'})
+    assert result.status_code == 206
+    content = result.headers['Content-Type'].split(';', 1)
+    assert content[0] == 'multipart/byteranges'
+    boundary = content[1].split('=', 1)[1]
+    after = 0
+    start, stop = 0, 0
+    for line in result.text.split('\n'):
+        if not line:
+            continue
+        if line == f'--{boundary}':
+            after = 1
+        elif after == 1:
+            assert 'Content-Type: ' in line
+            after = 2
+        elif after == 2:
+            assert 'Content-Range: bytes ' in line
+            range = line.split('bytes ', 1)[1].split('/', 1)
+            start, stop = [int(_) for _ in range[0].split('-', 1)]
+            assert int(range[1]) == len(body)
+            after = 3
+        elif after == 3:
+            assert line == body[start:stop].decode()
+            after = 0
+    assert line == f'--{boundary}--'

@@ -429,7 +429,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         env['HEADERS'] = {k.upper().strip(): v for k, v in env['HEADERS'].items()}
         path, env['QUERY_STRING'] = self.path.split('?', 1) if '?' in self.path else (self.path, '')
         env['PATH_INFO'] = unquote_plus(path, 'iso-8859-1')
-        host = env['HEADERS'].get('X-REAL-IP') or env['HEADERS'].get('X-FORWARDED-FOR') or self.address_string()
+        host = env['HEADERS'].get('X-REAL-IP') or env['HEADERS'].get('X-FORWARDED-FOR', '').split(',')[-1].strip() or self.address_string()
         if host != self.client_address[0]:
             env['REMOTE_HOST'] = host
             self.client_address = (host, self.client_address[1])

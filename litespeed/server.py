@@ -379,6 +379,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         skip_first = True
         body = env['BODY'].split(b'\n')
         i = 0
+        skip = -1
         while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
             line = body[i] + (b'\n' if i < len(body) else b'')
             try:
@@ -401,6 +402,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                             content = decoded.split(' ')[-1]
             except UnicodeDecodeError:
                 decoded = ''
+            if skip > 0:
+                skip -= 1
+                i += 1
+                continue
             if content and ((decoded and not decoded.startswith('Content-Type')) or not decoded):
                 if filename not in env['FILES'].get(name, {}):
                     if name not in env['FILES']:
@@ -411,9 +416,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                     file.write(line)
                 else:
                     skip_first = False
-            elif name and ((decoded and not re_name.findall(decoded)) or decoded != line) and not filename:
+            elif skip == 0:
                 env[env['REQUEST_METHOD']][name] = decoded if decoded and dashes.sub('', decoded, 1) != boundary else line
                 name = ''
+                skip = -1
+            elif name and ((decoded and not re_name.findall(decoded)) or decoded != line) and not filename and skip == -1:
+                skip = 1
             if not content:
                 line = decoded
             i += 1

@@ -67,7 +67,7 @@ def render_example(request: Request):
 @route(methods=['GET', 'POST'])
 def upload(request: Request):
     if request.FILES:
-        request.FILES['test']
+        # request.FILES['test']
         return request.FILES['file'].keys(), 200
     return serve('examples/html/upload.html')
 

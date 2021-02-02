@@ -99,8 +99,7 @@ def _handle_206(file: str, _in: BinaryIO, headers: Dict[str, str] = None, range:
                 return b'', 416
         if start is None:
             start = content_size - stop
-            stop = content_size - 1
-        elif stop is None:
+        if stop is None:
             stop = content_size - 1
         if max_bytes_per_request is not None:
             stop = min(start + max_bytes_per_request - 1, stop, content_size - 1)

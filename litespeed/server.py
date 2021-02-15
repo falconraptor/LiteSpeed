@@ -29,9 +29,9 @@ class WebServer(ThreadingTCPServer):
     application = None
     base_environ = Request()
     daemon_threads = True
-    clients, handlers = {}, {}
+    clients, handlers = {}, {}  # websocket vars
     id_counter = 0
-    websocket_handlers = {'new': [], 'message': [], 'left': []}
+    websocket_handlers = {'new': {}, 'message': {}, 'left': {}}
 
     def __init__(self, server_address, RequestHandlerClass, bind_and_activate: bool = True):
         super().__init__(server_address, RequestHandlerClass, bind_and_activate)
@@ -42,10 +42,13 @@ class WebServer(ThreadingTCPServer):
         self.setup_env(self.server_address[1])
 
     @classmethod
-    def attach_websocket_handler(cls, type: str, function: Callable[[dict, ThreadingTCPServer, Optional[str]], None]):
+    def attach_websocket_handler(cls, type: str, function: Callable[[dict, 'WebServer', Optional[str]], None], path: Optional[str] = None):
         if type not in {'new', 'message', 'left'}:
             raise ValueError
-        cls.websocket_handlers[type].append(function)
+        try:
+            cls.websocket_handlers[type][path].append(function)
+        except KeyError:
+            cls.websocket_handlers[type][path] = [function]
 
     @classmethod
     def setup_env(cls, port: int):
@@ -83,16 +86,18 @@ class WebServer(ThreadingTCPServer):
                 del self.clients[client['id']]
                 del self.handlers[client['handler_id']]
 
-    def handle(self, client, type: str, msg=None):
-        for f in self.websocket_handlers[type]:
-            f(client, self, *([msg] if msg else []))
+    def handle(self, client: dict, type: str, msg=None):
+        for path, channels in self.websocket_handlers[type].items():
+            if not path or re.fullmatch(path, client['request'].PATH_INFO):
+                for channel in channels:
+                    channel(client, self, *([msg] if msg else []))
 
     @staticmethod
-    def send_message(client, msg):
+    def send_message(client: dict, msg):
         client['handler'].send_message(msg)
 
     @staticmethod
-    def send_json(client, obj):
+    def send_json(client: dict, obj):
         client['handler'].send_json(obj)
 
     def send_message_all(self, msg):
@@ -210,12 +215,10 @@ class App:
             return _check_cors()
 
     @classmethod
-    def add_websocket(cls, function: Callable[[dict, WebServer, Optional[str]], None] = None, type: str = None):
-        if type not in {'new', 'message', 'left'}:
-            raise ValueError
+    def add_websocket(cls, type: str, path: Optional[str] = None, function: Callable[[dict, WebServer, Optional[str]], None] = None):
 
         def _wrapped(function: Callable[[dict, WebServer, Optional[str]], None]):
-            WebServer.websocket_handlers[type].append(function)
+            WebServer.attach_websocket_handler(type, function, path)
             return function
 
         if function:
@@ -360,6 +363,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     |                     Payload Data continued ...                |
     +---------------------------------------------------------------+
     """
+    server: WebServer
 
     def __init__(self, request, client_address, server):
         self.keep_alive = True
@@ -479,7 +483,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not self.parse_request():
             return
         env = self.get_environ()
-        if any(self.server.websocket_handlers.values()):  # only handshakes websockets if there is a function to handle them
+        if any(None in p or any(re.fullmatch(_, env.PATH_INFO) for _ in p.values()) for p in self.server.websocket_handlers.values()):  # only handshakes websockets if there is a function to handle them
             self.handshake(env)
             if self.valid_client:
                 while self.keep_alive:

@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="LiteSpeed",
-    version="1.1.1",
+    version="1.1.2",
     author="Dustin Surwill",
     author_email="dustinsurwill@gmail.com",
     description="A simple, fast webserver that is mostly customizable. Includes websockets.",
@@ -24,6 +24,7 @@ setuptools.setup(
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
+        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: Implementation :: CPython",
         "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
         "Topic :: Internet :: WWW/HTTP :: HTTP Servers",

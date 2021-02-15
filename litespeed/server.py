@@ -483,7 +483,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not self.parse_request():
             return
         env = self.get_environ()
-        if any(None in p or any(re.fullmatch(_, env.PATH_INFO) for _ in p.values()) for p in self.server.websocket_handlers.values()):  # only handshakes websockets if there is a function to handle them
+        if any(None in p or any(re.fullmatch(_, env.PATH_INFO) for _ in p.keys()) for p in self.server.websocket_handlers.values()):  # only handshakes websockets if there is a function to handle them
             self.handshake(env)
             if self.valid_client:
                 while self.keep_alive:

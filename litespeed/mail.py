@@ -73,7 +73,7 @@ class Mail:
                 maintype, subtype = ctype.split('/', 1)
                 with open(f, 'rb') as fp:
                     self.message.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=f)
-        return Mail
+        return self
 
     def send(self, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, tls: bool = True, ssl: bool = False, timeout: Optional[int] = None, wait: bool = False):
         """actually send the email. uses values from defualt_email if none specified"""

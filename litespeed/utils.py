@@ -17,10 +17,8 @@ class ExceptionReporter:
         self.tb = tb
         self.postmortem = None
 
-    def get_traceback_data(self) -> Dict[str, Any]:
-        """Return a dictionary containing traceback information.
-        :returns:Dict[str, Any]"""
-        frames = self.get_traceback_frames()
+    @staticmethod
+    def __format_frame_vars(frames):
         for frame in frames:
             if 'vars' in frame:
                 frame_vars = []
@@ -44,6 +42,12 @@ class ExceptionReporter:
                         v = f"Error in formatting: {e.__class__.__name__}: {e}".replace('<', '&lt;').replace('>', '&gt;')
                     frame_vars.append((k, repr(v) if not isinstance(v, str) else v))
                 frame['vars'] = frame_vars
+
+    def get_traceback_data(self) -> Dict[str, Any]:
+        """Return a dictionary containing traceback information.
+        :returns:Dict[str, Any]"""
+        frames = self.get_traceback_frames()
+        self.__format_frame_vars(frames)
         unicode_hint = ''
         if self.exc_type and issubclass(self.exc_type, UnicodeError):
             start = getattr(self.exc_value, 'start', None)

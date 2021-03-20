@@ -67,7 +67,7 @@ def render_example(request: Request):
 @route(methods=['GET', 'POST'])
 def upload(request: Request):
     if request.FILES:
-        request.FILES['test']
+        # request.FILES['test']
         return request.FILES['file'].keys(), 200
     return serve('examples/html/upload.html')
 
@@ -100,7 +100,7 @@ def echo(client: dict, server: WebServer, msg: str):
     # there is also a send_all and send_json_all functions in server
 
 
-@register_error_page(code=501)
+@register_error_page(code=501)  # code is any http status code int, preferably an error code (401, 404, 500, 501, etc...)
 def _501_error(request: Request, *args, **kwargs):
     return 'This is a 501 error', 501
 
@@ -109,11 +109,10 @@ def _501_error(request: Request, *args, **kwargs):
 def _501(request: Request):
     return '', 501
 
-# Example for serving partial content / 206 Requests
-@route(r'/media/([\w\s./]+)', methods=['GET'], no_end_slash=True)
-def media(request: Request,file:str):
-    range = request.get('HEADERS').get('RANGE')
-    return serve(f'examples/media/{file}', range=range)
+
+@route(r'/media/([\w\s./]+)', methods=['GET'], no_end_slash=True)  # Example for serving partial content / 206 Requests
+def media(request: Request, file: str):
+    return serve(f'examples/media/{file}', range=request.HEADERS.get('RANGE'))
 
 
 route(r'num/(?P<num>\d+)', function=test2)  # add function to routes without decorator: /num/[any number]/

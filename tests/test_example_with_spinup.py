@@ -37,10 +37,7 @@ def _server():
     return _server.port
 
 
-def url_test(url: str, allowed_methods: Iterable[str], expected_status: int,
-             expected_result: bytes, expected_headers: dict = None, skip_405: bool = False,
-             method_params: dict = None,
-             port: int = 8000, method_kwargs: dict = None):
+def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: bytes, expected_headers: dict = None, skip_405: bool = False, method_params: dict = None, port: int = 8000, method_kwargs: dict = None):
     if url[-1:] != '/' and '.' not in url[-5:] and '?':
         url += '/'
     if not expected_headers:
@@ -50,17 +47,13 @@ def url_test(url: str, allowed_methods: Iterable[str], expected_status: int,
     if not method_kwargs:
         method_kwargs = {}
     if url[-1:] == '/' and not expected_status == 404:
-        result = requests.get(
-            f'http://127.0.0.1:{port}/{url[:-1]}'.replace(f':{port}//', f':{port}/'),
-            allow_redirects=False)
+        result = requests.get(f'http://127.0.0.1:{port}/{url[:-1]}'.replace(f':{port}//', f':{port}/'), allow_redirects=False)
         assert result.content == b''
         assert result.status_code == 307
         assert result.headers['Location'] == url or result.headers['Location'] == f'/{url}'
     allowed_methods = {method.upper() for method in allowed_methods}
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
-        result = getattr(requests, method.lower()) \
-            (f'http://127.0.0.1:{port}/{url}'.replace(f':{port}//', f':{port}/'),
-             *([method_params] if method not in {'DELETE', 'OPTIONS'} else []), **method_kwargs)
+        result = getattr(requests, method.lower())(f'http://127.0.0.1:{port}/{url}'.replace(f':{port}//', f':{port}/'), *([method_params] if method not in {'DELETE', 'OPTIONS'} else []), **method_kwargs)
         if method in allowed_methods or '*' in allowed_methods:
             assert result.content == expected_result
             assert result.status_code == expected_status
@@ -85,14 +78,12 @@ def test_another(server):
 
 def test_json(server):
     url = '/examples/example/json/'
-    result = requests.get(f'http://127.0.0.1:{server}/{url[:-1]}'.replace(f':{server}//', f':{server}/'),
-                          allow_redirects=False)
+    result = requests.get(f'http://127.0.0.1:{server}/{url[:-1]}'.replace(f':{server}//', f':{server}/'), allow_redirects=False)
     assert result.content == b''
     assert result.status_code == 307
     assert result.headers['Location'] == url
     for method in ('GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS', 'PUT'):
-        result = getattr(requests, method.lower())(
-            f'http://127.0.0.1:{server}/{url}'.replace(f':{server}//', f':{server}/'))
+        result = getattr(requests, method.lower())(f'http://127.0.0.1:{server}/{url}'.replace(f':{server}//', f':{server}/'))
         result.json()
         assert result.status_code == 200
 
@@ -106,13 +97,11 @@ def test_test2(server):
 
 
 def test_index(server):
-    url_test('/examples/example/', ('*',), 200,
-             b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
+    url_test('/examples/example/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
 
 
 def test_index2(server):
-    url_test('/examples/example/index2/', ('*',), 200,
-             b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
+    url_test('/examples/example/index2/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
 
 
 def test_article(server):
@@ -124,20 +113,17 @@ def test_article(server):
 
 def test_readme(server):
     with open('README.md', 'rb') as readme:
-        url_test('/examples/example/readme/', ('*',), 200, readme.read(),
-                 {'Content-Type': mimetypes.guess_type('README.md')[0] or 'application/octet-stream'}, port=server)
+        url_test('/examples/example/readme/', ('*',), 200, readme.read(), {'Content-Type': mimetypes.guess_type('README.md')[0] or 'application/octet-stream'}, port=server)
 
 
 def test_file(server):
     with open('setup.py', 'rb') as file:
-        url_test('setup.py', ('*',), 200, file.read(), {'Content-Type': mimetypes.guess_type('setup.py')[0]},
-                 port=server)
+        url_test('setup.py', ('*',), 200, file.read(), {'Content-Type': mimetypes.guess_type('setup.py')[0]}, port=server)
 
 
 def test_render(server):
     with open('README.md', 'rt') as readme:
-        url_test('/examples/example/render_example/', ('GET',), 200,
-                 readme.read().replace('~~test~~', 'pytest').encode(), method_params={'test': 'pytest'}, port=server)
+        url_test('/examples/example/render_example/', ('GET',), 200, readme.read().replace('~~test~~', 'pytest').encode(), method_params={'test': 'pytest'}, port=server)
 
 
 def test_upload(server):
@@ -149,8 +135,7 @@ def test_upload(server):
 
 def test_css(server):
     with open('examples/static/test.css', 'rb') as file:
-        url_test('/examples/example/css/', ('GET',), 200, file.read(),
-                 {'Content-Type': mimetypes.guess_type('examples/static/test.css')[0]}, port=server)
+        url_test('/examples/example/css/', ('GET',), 200, file.read(), {'Content-Type': mimetypes.guess_type('examples/static/test.css')[0]}, port=server)
 
 
 def test_static(server):
@@ -174,9 +159,33 @@ def test_501(server):
 
 def test_206(server):
     with open('examples/media/206.txt', 'rb') as file:
-        # HACK we cannot specify passing in headers atm
-        # To get around this, we pass it as a GET parameter
-        expected_ouput = file.read()
-        headers = {'RANGE': f'bytes={0}-'}
-        headers = {'headers': headers}
-        url_test(f'/media/206.txt', ('GET',), 206, expected_ouput, method_kwargs=headers, port=server)
+        body = file.read()
+    url_test('/media/206.txt', ('GET',), 416, b'', method_kwargs={'headers': {'RANGE': 'chars=0-8'}}, port=server)
+    url_test('/media/206.txt', ('GET',), 416, b'', method_kwargs={'headers': {'RANGE': 'bytes=0-8,7-16'}}, port=server)
+    for range, result in (('bytes=0-8', body[:8 + 1]), ('bytes=8-16', body[8:16 + 1]), ('bytes=16-32', body[16:32 + 1])):
+        url_test('/media/206.txt', ('GET',), 206, result, method_kwargs={'headers': {'RANGE': range}}, port=server)
+    result = requests.get(f'http://127.0.0.1:{server}/media/206.txt', headers={'RANGE': 'bytes=0-8,16-32'})
+    assert result.status_code == 206
+    content = result.headers['Content-Type'].split(';', 1)
+    assert content[0] == 'multipart/byteranges'
+    boundary = content[1].split('=', 1)[1]
+    after = 0
+    start, stop = 0, 0
+    for line in result.text.split('\n'):
+        if not line:
+            continue
+        if line == f'--{boundary}':
+            after = 1
+        elif after == 1:
+            assert 'Content-Type: ' in line
+            after = 2
+        elif after == 2:
+            assert 'Content-Range: bytes ' in line
+            range = line.split('bytes ', 1)[1].split('/', 1)
+            start, stop = [int(_) for _ in range[0].split('-', 1)]
+            assert int(range[1]) == len(body)
+            after = 3
+        elif after == 3:
+            assert line == body[start:stop + 1].decode()
+            after = 0
+    assert line == f'--{boundary}--'

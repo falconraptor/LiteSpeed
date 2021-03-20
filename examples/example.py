@@ -1,3 +1,5 @@
+from http import HTTPStatus
+
 from litespeed import add_websocket, App, register_error_page, render, route, serve, start_with_args, WebServer
 from litespeed.error import ResponseError
 from litespeed.utils import Request
@@ -116,6 +118,10 @@ def _501_exception(request: Request):
 @route(methods=['GET'])
 def _404_exception(request: Request):
     raise ResponseError(404, "This page should appear as a 404 error.")
+
+@route(methods=['GET'])
+def _404_exception_alt(request: Request):
+    raise ResponseError(HTTPStatus.NOT_FOUND, "This page should appear as a 404 error.")
 
 @route(methods=['GET'])
 def _404_error(request: Request):

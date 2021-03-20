@@ -111,6 +111,17 @@ def test_501_exception():
     url_test('/examples/example/_501_exception/', ('GET',), 501, [b'This is a 501 error'])
 
 
+def test_404_exception():
+    url_test('/examples/example/_404_exception/', ('GET',), 404, [b'This page should appear as a 404 error.'])
+
+
+def test_404_exception_alt():
+    url_test('/examples/example/_404_exception_alt/', ('GET',), 404, [b'This page should appear as a 404 error.'])
+
+def test_404_error():
+    url_test('/examples/example/_404_error/', ('GET',), 404, [b'This page should appear as a 404 error.'])
+
+
 def test_206():
     with open('examples/media/206.txt', 'rb') as file:
         body = [file.read()]

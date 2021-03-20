@@ -159,6 +159,16 @@ def test_501_code(server):
 def test_501_exception(server):
     url_test('/examples/example/_501_exception/', ('GET',), 501, b'This is a 501 error', port=server)
 
+def test_404_exception(server):
+    url_test('/examples/example/_404_exception/', ('GET',), 404, b'This page should appear as a 404 error.', port=server)
+
+def test_404_exception_alt(server):
+    url_test('/examples/example/_404_exception_alt/', ('GET',), 404, b'This page should appear as a 404 error.', port=server)
+
+def test_404_error(server):
+    url_test('/examples/example/_404_error/', ('GET',), 404, b'This page should appear as a 404 error.', port=server)
+
+
 
 def test_206(server):
     with open('examples/media/206.txt', 'rb') as file:

@@ -4,6 +4,8 @@ from typing import Union
 
 class ResponseError(Exception):
     def __init__(self, response_code: Union[HTTPStatus, int], message: str = None, inner_exception: Exception = None):
+        if isinstance(response_code, HTTPStatus):
+            response_code = response_code.value
         self.code = response_code
         self.message = message
         self.inner_exception = inner_exception

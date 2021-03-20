@@ -153,8 +153,11 @@ def test_echo(server):
     assert {'msg': 'Hello World!', 'id': 1} == data
 
 
-def test_501(server):
-    url_test('/examples/example/_501/', ('GET',), 501, b'This is a 501 error', port=server)
+def test_501_code(server):
+    url_test('/examples/example/_501_code/', ('GET',), 501, b'This is a 501 error', port=server)
+
+def test_501_exception(server):
+    url_test('/examples/example/_501_exception/', ('GET',), 501, b'This is a 501 error', port=server)
 
 
 def test_206(server):

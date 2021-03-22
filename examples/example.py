@@ -39,12 +39,12 @@ def test2(request: Request, num: int):
 
 @route()  # uses method name to generate url but because it is index: /
 def index(request: Request):
-    return [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()]  # return list of urls which gets joined and sent to client
+    return [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls]  # return list of urls which gets joined and sent to client
 
 
 @route()  # uses method name to generate url: /index2/
 def index2(request: Request):  # for use when len(urls) <= 3
-    return [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()], 200  # return list of urls which gets joined and sent to client with status 200
+    return [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls], 200  # return list of urls which gets joined and sent to client with status 200
 
 
 @route(r'(?P<year>\d{4})/(?P<article>\d+)')  # use regex named groups to generate url: /[any 4 digit number]/[any number]/
@@ -107,28 +107,34 @@ def echo(client: dict, server: WebServer, msg: str):
 def _501_error_page(request: Request, *args, **kwargs):
     return 'This is a 501 error', 501
 
+
 @route(methods=['GET'])
 def _501_code(request: Request):
     return '', 501
+
 
 @route(methods=['GET'])
 def _501_exception(request: Request):
     raise ResponseError(501)
 
+
 @route(methods=['GET'])
 def _404_exception(request: Request):
     raise ResponseError(404, "This page should appear as a 404 error.")
+
 
 @route(methods=['GET'])
 def _404_exception_alt(request: Request):
     raise ResponseError(HTTPStatus.NOT_FOUND, "This page should appear as a 404 error.")
 
+
 @route(methods=['GET'])
 def _404_error(request: Request):
     return "This page should appear as a 404 error.", 404
 
+
 @route(methods=['GET'])
-def _500_nested_exception(request: Request): # Useful for 404 operations when polling database or directory files
+def _500_nested_exception(request: Request):  # Useful for 404 operations when polling database or directory files
     def perform_internal_operation():
         raise NotImplementedError()
     try:
@@ -142,7 +148,22 @@ def media(request: Request, file: str):
     return serve(f'examples/media/{file}', range=request.HEADERS.get('RANGE'))
 
 
+@route(methods=['GET'])
+def multi_method(request: Request):
+    return request.REQUEST_METHOD, 200
+
+
+@route(methods=['POST'])
+def multi_method(request: Request):
+    return request.REQUEST_METHOD, 202
+
+
+@route(methods=['PUT'])
+def multi_method(request: Request):
+    return request.REQUEST_METHOD, 201
+
+
 route(r'num/(?P<num>\d+)', function=test2)  # add function to routes without decorator: /num/[any number]/
 if __name__ == '__main__':
-    print(App._urls)
+    print(*(u for u in App._urls), sep='\n')
     start_with_args()  # routes should be declared before start

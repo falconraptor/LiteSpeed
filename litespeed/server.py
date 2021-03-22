@@ -119,7 +119,7 @@ class WebServer(ThreadingTCPServer):
 class App:
     """Handles request from client"""
     __route_cache = {}
-    _urls = {}
+    _urls = []
     _status = {s.value: f'{s.value} {s.phrase}' for s in HTTPStatus}
     debug = False
     _cookie_age = 3600
@@ -149,19 +149,20 @@ class App:
         cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
         called = False
         try:
+            if not f_list:
+                result = self.error_routes.get(404, (lambda e: (b'', 404, {'Content-Type': 'text/public'})))(env)
             for f in f_list:
-                if isinstance(f, bool):
-                    result = self.error_routes.get(404, (lambda e: (b'', 404, {'Content-Type': 'text/public'})))(env)
                 if path[-1:] != '/' and 'result' not in locals() and not f[0].no_end_slash:  # auto rediects to url that ends in / if no_end_slash is False
                     result = self.error_routes.get(307, (lambda e, *a, **k: (b'', 307, {'Location': f'{path}/'})))(env, *f[1], **f[2])
-                if 'result' not in locals():
+                else:
                     r = self._handle_cors(f, headers, env)
                     if ('*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods) or not r:  # checks for allowed methods
                         result = self.error_routes.get(405, (lambda e, *a, **k: (b'', 405, {'Content-Type': 'text/public'})))(env, *f[1], **f[2])
                     else:
                         result = f[0](env, *f[1], **f[2])
                         called = True
-                if len(result) > 1 or result[1] != 405:
+                l_result = len(result)
+                if l_result == 1 or l_result > 3 or (l_result >= 2 and result[1] != 405):
                     break
         except ResponseError as e:
             if e.code in self.error_routes and e.code not in f[0].disable_default_errors:
@@ -171,7 +172,7 @@ class App:
                     result = b'', e.code, {'Content-Type': 'text/public'}
                 else:
                     result = e.message, e.code, None
-        except Exception:
+        except Exception as e:
             result = self.error_routes[500](env, *f[1], **f[2])
         r = self._handle_result(result, headers, cookie, env)
         status = int(r[1].split()[0])
@@ -306,10 +307,10 @@ class App:
             _handle_compression()
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 
-    def _handle_route_cache(self, env: Request) -> List[Union[bool, Tuple[Callable, Union[Generator, List[str]], Dict[str, str]]]]:
+    def _handle_route_cache(self, env: Request) -> List[Tuple[Callable, Union[Generator, List[str]], Dict[str, str]]]:
         path = env.PATH_INFO
         if path not in self.__route_cache:  # finds url from urls and adds to ROUTE_CACHE to prevent future lookups
-            for _, url in self._urls.items():
+            for url in self._urls:
                 tmp = path + ('/' if not url.no_end_slash and path[-1] != '/' and url.re.pattern[-1] == '/' else '')
                 m = url.re.fullmatch(tmp[1:]) if tmp and tmp[0] == '/' and url.re.pattern[0] != '/' else url.re.fullmatch(tmp)
                 if m:
@@ -321,10 +322,7 @@ class App:
                     except KeyError:
                         self.__route_cache[path] = [(url, groups, group_dict)]
                     url.cache.append(path)
-                    break
-            else:
-                return [False]
-        return self.__route_cache[path]
+        return self.__route_cache.get(path, [])
 
     @classmethod
     def route(cls, url: Optional[str] = None, methods: Union[Iterable, str] = '*', function: Callable = None, cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, disable_default_errors: Optional[Iterable[int]] = None):
@@ -336,16 +334,15 @@ class App:
                 url = (func.__module__.replace('.', '/') + '/').replace('__main__/', '') + (func.__name__ + '/').replace('index/', '')
             if not url or (url[-1] != '/' and '.' not in url[-5:] and not no_end_slash):
                 url = (url or '') + '/'
-            if url not in cls._urls:
-                func.no_end_slash = no_end_slash
-                func.url = url
-                func.re = re.compile(url)
-                func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.lower().split(','))
-                func.cors = None if not cors else {c.lower() for c in cors} if isinstance(cors, (list, set, dict, tuple)) else {c for c in cors.lower().strip().split(',') if c}
-                func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
-                func.cache = []
-                func.disable_default_errors = set(disable_default_errors) if disable_default_errors else set()
-                cls._urls[url] = func
+            func.no_end_slash = no_end_slash
+            func.url = url
+            func.re = re.compile(url)
+            func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.lower().split(','))
+            func.cors = None if not cors else {c.lower() for c in cors} if isinstance(cors, (list, set, dict, tuple)) else {c for c in cors.lower().strip().split(',') if c}
+            func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
+            func.cache = []
+            func.disable_default_errors = set(disable_default_errors) if disable_default_errors else set()
+            cls._urls.append(func)
             return partial(func)
 
         if function:

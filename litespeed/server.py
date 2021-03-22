@@ -482,7 +482,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         if not self.parse_request():
             return
-        env = self.get_environ()
+        env = self.environ = self.get_environ()
         if any(None in p or any(re.fullmatch(_, env.PATH_INFO) for _ in p.keys()) for p in self.server.websocket_handlers.values()):  # only handshakes websockets if there is a function to handle them
             self.handshake(env)
             if self.valid_client:
@@ -588,6 +588,6 @@ class ServerHandler(SimpleHandler):
             environ = Request(environ)
         er = ExceptionReporter(environ, *sys.exc_info()).get_traceback_html()[0]
         if App._admins and not App.debug and Mail.default_email['host']:
-            Mail(f'Internal Server Error: {environ.get("PATH_INFO", "???")}', '\n'.join(str(e) for e in sys.exc_info()), App._admins, html=er.decode()).embed().send()
+            Mail(f'Internal Server Error: {(environ or {}).get("PATH_INFO", "???")}', '\n'.join(str(e) for e in sys.exc_info()), App._admins, html=er.decode()).embed().send()
         start_response(self.error_status, self.error_headers[:] if not App.debug else [('Content-Type', 'text/html')], sys.exc_info())
         return [er] if App.debug else [self.error_body]

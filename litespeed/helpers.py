@@ -21,7 +21,7 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
         data = {}
     if files is None:
         files = []
-    lines, status, headers = serve(file, cache_age, status_override=status_override, range=request.HEADERS.get('RANGE'))
+    lines, status, headers = serve(file, cache_age, status_override=status_override, range=(request or {}).get('HEADERS', {}).get('RANGE'))
     if status in {200, status_override}:
         lines = lines.decode()
         if isinstance(files, str):

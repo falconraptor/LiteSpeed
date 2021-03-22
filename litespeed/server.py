@@ -15,7 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler
 from io import BytesIO
 from socketserver import ThreadingTCPServer
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union, Generator, Dict
 from urllib.parse import parse_qs, unquote_plus
 from wsgiref.handlers import SimpleHandler
 from litespeed.error import ResponseError
@@ -141,26 +141,28 @@ class App:
             e = '', 500
         return e
 
-
     def __call__(self, env: dict, start_response: Callable):
         path = env['PATH_INFO']
-        f = self._handle_route_cache(path)
         env = Request(env)
+        f_list = self._handle_route_cache(env)
         headers = {}
         cookie = set(env['COOKIE'].output().replace('\r', '').split('\n'))
         called = False
         try:
-            if isinstance(f, bool):
-                result = self.error_routes.get(404, (lambda e: (b'', 404, {'Content-Type': 'text/public'})))(env)
-            if path[-1:] != '/' and 'result' not in locals() and not f[0].no_end_slash:  # auto rediects to url that ends in / if no_end_slash is False
-                result = self.error_routes.get(307, (lambda e, *a, **k: (b'', 307, {'Location': f'{path}/'})))(env, *f[1], **f[2])
-            if 'result' not in locals():
-                r = self._handle_cors(f, headers, env)
-                if ('*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods) or not r:  # checks for allowed methods
-                    result = self.error_routes.get(405, (lambda e, *a, **k: (b'', 405, {'Content-Type': 'text/public'})))(env, *f[1], **f[2])
-                else:
-                    result = f[0](env, *f[1], **f[2])
-                    called = True
+            for f in f_list:
+                if isinstance(f, bool):
+                    result = self.error_routes.get(404, (lambda e: (b'', 404, {'Content-Type': 'text/public'})))(env)
+                if path[-1:] != '/' and 'result' not in locals() and not f[0].no_end_slash:  # auto rediects to url that ends in / if no_end_slash is False
+                    result = self.error_routes.get(307, (lambda e, *a, **k: (b'', 307, {'Location': f'{path}/'})))(env, *f[1], **f[2])
+                if 'result' not in locals():
+                    r = self._handle_cors(f, headers, env)
+                    if ('*' not in f[0].methods and env['REQUEST_METHOD'].lower() not in f[0].methods) or not r:  # checks for allowed methods
+                        result = self.error_routes.get(405, (lambda e, *a, **k: (b'', 405, {'Content-Type': 'text/public'})))(env, *f[1], **f[2])
+                    else:
+                        result = f[0](env, *f[1], **f[2])
+                        called = True
+                if len(result) > 1 or result[1] != 405:
+                    break
         except ResponseError as e:
             if e.code in self.error_routes and e.code not in f[0].disable_default_errors:
                 result = self.error_routes[e.code](env, *f[1], **f[2])
@@ -304,21 +306,24 @@ class App:
             _handle_compression()
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 
-    def _handle_route_cache(self, path: str) -> Union[bool, Callable]:
+    def _handle_route_cache(self, env: Request) -> List[Union[bool, Tuple[Callable, Union[Generator, List[str]], Dict[str, str]]]]:
+        path = env.PATH_INFO
         if path not in self.__route_cache:  # finds url from urls and adds to ROUTE_CACHE to prevent future lookups
             for _, url in self._urls.items():
                 tmp = path + ('/' if not url.no_end_slash and path[-1] != '/' and url.re.pattern[-1] == '/' else '')
                 m = url.re.fullmatch(tmp[1:]) if tmp and tmp[0] == '/' and url.re.pattern[0] != '/' else url.re.fullmatch(tmp)
                 if m:
-                    groups = m.groups()
-                    for key, value in m.groupdict().items():
-                        if value in groups:
-                            groups = (g for g in groups if g != value)
-                    self.__route_cache[path] = (url, groups, m.groupdict())
+                    group_dict = m.groupdict()
+                    group_values = group_dict.values()
+                    groups = [g for g in m.groups() if g not in group_values]
+                    try:
+                        self.__route_cache[path].append((url, groups, group_dict))
+                    except KeyError:
+                        self.__route_cache[path] = [(url, groups, group_dict)]
                     url.cache.append(path)
                     break
             else:
-                return False
+                return [False]
         return self.__route_cache[path]
 
     @classmethod

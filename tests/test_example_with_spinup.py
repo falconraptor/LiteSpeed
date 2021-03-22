@@ -97,11 +97,11 @@ def test_test2(server):
 
 
 def test_index(server):
-    url_test('/examples/example/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
+    url_test('/examples/example/', ('*',), 200, b''.join(f'<a href="{func.url}">{func.url}</a><br>'.encode() for func in App._urls), port=server)
 
 
 def test_index2(server):
-    url_test('/examples/example/index2/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
+    url_test('/examples/example/index2/', ('*',), 200, b''.join(f'<a href="{func.url}">{func.url}</a><br>'.encode() for func in App._urls), port=server)
 
 
 def test_article(server):
@@ -156,18 +156,21 @@ def test_echo(server):
 def test_501_code(server):
     url_test('/examples/example/_501_code/', ('GET',), 501, b'This is a 501 error', port=server)
 
+
 def test_501_exception(server):
     url_test('/examples/example/_501_exception/', ('GET',), 501, b'This is a 501 error', port=server)
+
 
 def test_404_exception(server):
     url_test('/examples/example/_404_exception/', ('GET',), 404, b'This page should appear as a 404 error.', port=server)
 
+
 def test_404_exception_alt(server):
     url_test('/examples/example/_404_exception_alt/', ('GET',), 404, b'This page should appear as a 404 error.', port=server)
 
+
 def test_404_error(server):
     url_test('/examples/example/_404_error/', ('GET',), 404, b'This page should appear as a 404 error.', port=server)
-
 
 
 def test_206(server):
@@ -202,3 +205,9 @@ def test_206(server):
             assert line == body[start:stop + 1].decode()
             after = 0
     assert line == f'--{boundary}--'
+
+
+def test_multi_method(server):
+    url_test('/examples/example/multi_method/', ('GET',), 200, b'GET', port=server, skip_405=True)
+    url_test('/examples/example/multi_method/', ('POST',), 202, b'POST', port=server, skip_405=True)
+    url_test('/examples/example/multi_method/', ('PUT',), 201, b'PUT', port=server, skip_405=True)

@@ -18,7 +18,7 @@ from socketserver import ThreadingTCPServer
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 from urllib.parse import parse_qs, unquote_plus
 from wsgiref.handlers import SimpleHandler
-
+from litespeed.error import ResponseError
 from litespeed.mail import Mail
 from litespeed.utils import ExceptionReporter, json_serial, Request
 
@@ -141,6 +141,7 @@ class App:
             e = '', 500
         return e
 
+
     def __call__(self, env: dict, start_response: Callable):
         path = env['PATH_INFO']
         f = self._handle_route_cache(path)
@@ -160,6 +161,14 @@ class App:
                 else:
                     result = f[0](env, *f[1], **f[2])
                     called = True
+        except ResponseError as e:
+            if e.code in self.error_routes and e.code not in f[0].disable_default_errors:
+                result = self.error_routes[e.code](env, *f[1], **f[2])
+            else:
+                if e.message is None:
+                    result = b'', e.code, {'Content-Type': 'text/public'}
+                else:
+                    result = e.message, e.code, None
         except Exception:
             result = self.error_routes[500](env, *f[1], **f[2])
         r = self._handle_result(result, headers, cookie, env)

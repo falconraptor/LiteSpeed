@@ -1,4 +1,7 @@
+from http import HTTPStatus
+
 from litespeed import add_websocket, App, register_error_page, render, route, serve, start_with_args, WebServer
+from litespeed.error import ResponseError
 from litespeed.utils import Request
 
 """Any function with a route decorator must follow one of the following return patterns:
@@ -101,13 +104,37 @@ def echo(client: dict, server: WebServer, msg: str):
 
 
 @register_error_page(code=501)  # code is any http status code int, preferably an error code (401, 404, 500, 501, etc...)
-def _501_error(request: Request, *args, **kwargs):
+def _501_error_page(request: Request, *args, **kwargs):
     return 'This is a 501 error', 501
 
+@route(methods=['GET'])
+def _501_code(request: Request):
+    return '', 501
 
 @route(methods=['GET'])
-def _501(request: Request):
-    return '', 501
+def _501_exception(request: Request):
+    raise ResponseError(501)
+
+@route(methods=['GET'])
+def _404_exception(request: Request):
+    raise ResponseError(404, "This page should appear as a 404 error.")
+
+@route(methods=['GET'])
+def _404_exception_alt(request: Request):
+    raise ResponseError(HTTPStatus.NOT_FOUND, "This page should appear as a 404 error.")
+
+@route(methods=['GET'])
+def _404_error(request: Request):
+    return "This page should appear as a 404 error.", 404
+
+@route(methods=['GET'])
+def _500_nested_exception(request: Request): # Useful for 404 operations when polling database or directory files
+    def perform_internal_operation():
+        raise NotImplementedError()
+    try:
+        perform_internal_operation()
+    except Exception as e:
+        raise ResponseError(500, inner_exception=e)
 
 
 @route(r'/media/([\w\s./]+)', methods=['GET'], no_end_slash=True)  # Example for serving partial content / 206 Requests

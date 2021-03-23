@@ -1,0 +1,28 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python 3.x
+      uses: actions/setup-python@v1
+      with:
+        python-version: '3.6'
+    - name: Get the version
+      uses: ./.github/actions/get_version
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install setuptools wheel twine
+    - name: Build and publish
+      env:
+        TWINE_USERNAME: '__token__'
+        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
+        VERSION: ${{ steps.get_version.outputs.VERSION }}
+      run: |
+        python setup.py sdist bdist_wheel
+        twine upload dist/*

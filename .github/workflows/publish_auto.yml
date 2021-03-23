@@ -3,7 +3,6 @@ name: Publish
 on:
   release:
     types: [ created ]
-  workflow_dispatch:
 
 jobs:
   publish:
@@ -15,7 +14,8 @@ jobs:
       with:
         python-version: '3.6'
     - name: Get the version
-      uses: ./.github/actions/get_version
+      id: get_version
+      run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/v}
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip

@@ -15,8 +15,7 @@ jobs:
       with:
         python-version: '3.6'
     - name: Get the version
-      id: get_version
-      run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/v}
+      uses: ./.github/actions/get_version
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip

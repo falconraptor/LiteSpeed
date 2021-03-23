@@ -1,0 +1,17 @@
+name: 'Get Version'
+description: 'Get version from tag or input'
+inputs:
+  version:
+    description: 'Version to release'
+    required: false
+outputs:
+  version:
+    description: 'Version based on tag or input'
+    value: ${{ inputs.version || steps.get_version.outputs.VERSION }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Get the version
+      id: get_version
+      run: echo ::set-output name=VERSION::${GITHUB_REF#refs/tags/v}
+      shell: bash

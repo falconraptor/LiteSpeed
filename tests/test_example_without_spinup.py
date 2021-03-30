@@ -163,3 +163,7 @@ def test_multi_method():
     url_test('/examples/example/multi_method/', ('GET',), 200, [b'GET'], skip_405=True)
     url_test('/examples/example/multi_method/', ('POST',), 202, [b'POST'], skip_405=True)
     url_test('/examples/example/multi_method/', ('PUT',), 201, [b'PUT'], skip_405=True)
+
+
+def test_broken():
+    url_test('/examples/example/broken/', ('GET',), 501, ['This is a 501 error'.encode()], skip_405=True)

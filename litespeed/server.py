@@ -161,8 +161,8 @@ class App:
                     else:
                         result = f[0](env, *f[1], **f[2])
                         called = True
-                l_result = len(result)
-                if l_result == 1 or l_result > 3 or (l_result >= 2 and result[1] != 405):
+                l_result = len(result or [])
+                if l_result <= 1 or l_result > 3 or isinstance(result, dict) or (l_result >= 2 and result[1] != 405):
                     break
         except ResponseError as e:
             if e.code in self.error_routes and e.code not in f[0].disable_default_errors:

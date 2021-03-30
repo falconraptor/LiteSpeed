@@ -163,7 +163,12 @@ def multi_method(request: Request):
     return request.REQUEST_METHOD, 201
 
 
+@route(methods=['GET'])
+def broken(request: Request):
+    pass
+
+
 route(r'num/(?P<num>\d+)', function=test2)  # add function to routes without decorator: /num/[any number]/
 if __name__ == '__main__':
-    print(*(u for u in App._urls), sep='\n')
+    print(*(u.url for u in App._urls), sep='\n')
     start_with_args()  # routes should be declared before start

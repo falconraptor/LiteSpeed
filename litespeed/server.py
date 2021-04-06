@@ -33,8 +33,8 @@ class WebServer(ThreadingTCPServer):
     id_counter = 0
     websocket_handlers = {'new': {}, 'message': {}, 'left': {}}
 
-    def __init__(self, server_address, RequestHandlerClass, bind_and_activate: bool = True):
-        super().__init__(server_address, RequestHandlerClass, bind_and_activate)
+    def __init__(self, server_address, request_handler_class, bind_and_activate: bool = True):
+        super().__init__(server_address, request_handler_class, bind_and_activate)
 
     def server_bind(self):
         """Override server_bind to store the server name."""
@@ -55,10 +55,10 @@ class WebServer(ThreadingTCPServer):
         if not cls.base_environ:
             cls.base_environ = Request({'SERVER_NAME': socket.gethostname(), 'GATEWAY_INTERFACE': 'CGI/1.1', 'SERVER_PORT': str(port), 'REMOTE_HOST': '', 'CONTENT_LENGTH': '', 'SCRIPT_NAME': ''})
 
-    def message_received(self, handler, msg):
+    def message_received(self, handler: 'RequestHandler', msg: str):
         self.handle(self.handlers[id(handler)], 'message', msg)
 
-    def new_client(self, handler, env):
+    def new_client(self, handler: 'RequestHandler', env: Request):
         self.id_counter += 1
         client = {
             'id': self.id_counter,
@@ -69,7 +69,7 @@ class WebServer(ThreadingTCPServer):
         self.handlers[client['handler_id']] = self.clients[client['id']] = client
         self.handle(client, 'new')
 
-    def client_left(self, handler):
+    def client_left(self, handler: 'RequestHandler'):
         try:
             client = self.handlers[id(handler)]
             self.handle(client, 'left')
@@ -86,21 +86,21 @@ class WebServer(ThreadingTCPServer):
                 del self.clients[client['id']]
                 del self.handlers[client['handler_id']]
 
-    def handle(self, client: dict, type: str, msg=None):
+    def handle(self, client: dict, type: str, msg: Optional[str] = None):
         for path, channels in self.websocket_handlers[type].items():
             if not path or re.fullmatch(path, client['request'].PATH_INFO):
                 for channel in channels:
-                    channel(client, self, *([msg] if msg else []))
+                    channel(client, self, *([msg] if msg is not None else []))
 
     @staticmethod
-    def send_message(client: dict, msg):
+    def send_message(client: dict, msg: Union[str, bytes]):
         client['handler'].send_message(msg)
 
     @staticmethod
     def send_json(client: dict, obj):
         client['handler'].send_json(obj)
 
-    def send_message_all(self, msg):
+    def send_message_all(self, msg: Union[str, bytes]):
         for client in self.clients.values():
             client['handler'].send_message(msg)
 
@@ -182,8 +182,7 @@ class App:
         return r[0]
 
     @classmethod
-    def register_error_page(cls, function: Callable = None, code: int = None):
-        assert code is not None
+    def register_error_page(cls, code: int, function: Callable = None):
 
         def _wrapped(function: Callable):
             cls.error_routes[code] = function
@@ -241,15 +240,13 @@ class App:
         body = ''
         status = '200 OK'
 
-        def _process_headers(request_headers):
+        def _process_headers(request_headers: Union[dict, tuple, list]):
             if isinstance(request_headers, dict):
                 headers.update(request_headers)
-            elif isinstance(request_headers, tuple):
+            elif isinstance(request_headers, tuple) or (isinstance(request_headers, list) and isinstance(request_headers[0], tuple)):
                 headers.update(dict(request_headers))
-            elif isinstance(request_headers, list) and isinstance(request_headers[0], tuple):
-                headers.update(dict(result))
 
-        def _handle_status(_status):
+        def _handle_status(_status: Union[int, HTTPStatus, str]):
             nonlocal status
             if not _status:
                 status = '200 OK'
@@ -536,14 +533,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             message_bytes.append(message_byte ^ masks[len(message_bytes) % 4])
         opcode_handler(self, message_bytes.decode('utf8'))
 
-    def handshake(self, env: dict):
+    def handshake(self, env: Request):
         if env['REQUEST_METHOD'] != 'GET' or env['HEADERS'].get('UPGRADE', '').lower() != 'websocket' or 'sec-websocket-key' not in self.headers:
             return
         self.handshake_done = self.request.send(f'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {b64encode(sha1((self.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).strip().decode("ASCII")}\r\n\r\n'.encode())
         self.valid_client = True
         self.server.new_client(self, env)
 
-    def send_message(self, message, opcode: int = 0x1) -> bool:
+    def send_message(self, message: Union[bytes, str], opcode: int = 0x1) -> bool:
         """Important: Fragmented(=continuation) messages are not supported since their usage cases are limited - when we don't know the payload length."""
         if isinstance(message, bytes):
             try:
@@ -565,7 +562,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             header.append(0x7f)
             header.extend(struct.pack(">Q", payload_length))
         else:
-            raise Exception("Message is too big. Consider breaking it into chunks.")
+            raise ValueError("Message is too big. Consider breaking it into chunks.")
         try:
             self.request.send(header + payload)
         except Exception as e:

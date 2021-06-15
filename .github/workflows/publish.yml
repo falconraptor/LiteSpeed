@@ -1,8 +1,9 @@
 name: Publish
 
 on:
-  release:
-    types: [ created ]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       version:
@@ -21,7 +22,7 @@ jobs:
     - name: Get the version
       id: get_version
       run: |
-        var=$(echo ${{GITHUB_REF}} | cut -dv -f2)
+        var=$(echo ${{github.ref}} | cut -dv -f2)
         echo ::set-output name=VERSION::$var
     - name: Install dependencies
       run: |

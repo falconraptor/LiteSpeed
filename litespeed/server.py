@@ -421,9 +421,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             if content and ((decoded and not decoded.startswith('Content-Type')) or not decoded):
                 if filename not in env['FILES'].get(name, {}):
                     if name not in env['FILES']:
-                        env['FILES'][name] = [(filename, file)]
+                        env['FILES'][name] = {filename: file}
                     else:
-                        env['FILES'][name].append((filename, file))
+                        env['FILES'][name][filename] = file
                 if not skip_first:
                     file.write(line)
                 else:

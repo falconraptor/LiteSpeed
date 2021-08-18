@@ -159,6 +159,15 @@ def test_206():
     assert line == f'--{boundary}--'.encode()
 
 
+
+def test_route_decorator():
+    url_test('/route_decorator/', ('GET',), 200, [b''], skip_405=True)
+    url_test('/route_decorator/', ('PUT',), 202, [b''], skip_405=True)
+    url_test('/route_decorator/', ('POST',), 201, [b''], skip_405=True)
+    url_test('/route_decorator/', ('DELETE',), 204, [b''], skip_405=True)
+    url_test('/route_decorator/', ('PATCH',), 202, [b''], skip_405=True)
+
+
 def test_multi_method():
     url_test('/examples/example/multi_method/', ('GET',), 200, [b'GET'], skip_405=True)
     url_test('/examples/example/multi_method/', ('POST',), 202, [b'POST'], skip_405=True)

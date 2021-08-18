@@ -137,10 +137,36 @@ def _404_error(request: Request):
 def _500_nested_exception(request: Request):  # Useful for 404 operations when polling database or directory files
     def perform_internal_operation():
         raise NotImplementedError()
+
     try:
         perform_internal_operation()
     except Exception as e:
         raise ResponseError(500, inner_exception=e)
+
+
+@route.get("route_decorator")
+def get_test(request):
+    return "", 200  # Ok
+
+
+@route.put("route_decorator")
+def put_test(request):
+    return "", 202  # Accepted
+
+
+@route.post("route_decorator")
+def post_test(request):
+    return "", 201  # Created
+
+
+@route.delete("route_decorator")
+def delete_test(request):
+    return "", 204  # No content
+
+
+@route.patch("route_decorator")
+def patch_test(request):
+    return "", 202  # Accepted
 
 
 @route(r'/media/([\w\s./]+)', methods=['GET'], no_end_slash=True)  # Example for serving partial content / 206 Requests

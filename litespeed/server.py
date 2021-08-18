@@ -325,29 +325,6 @@ class App:
     def route(cls, url: Optional[str] = None, methods: Union[Iterable, str] = '*', function: Callable = None, cors: Optional[Union[Iterable, str]] = None, cors_methods: Optional[Union[Iterable, str]] = None, no_end_slash: bool = False, disable_default_errors: Optional[Iterable[int]] = None):
         """Handles adding function to urls"""
 
-        def method_wrapper(self, method: str, exclusive: bool = False):
-            method = method.lower()
-            if '*' in self.methods or exclusive:
-                self.methods = {method}
-            else:
-                self.methods.add(method)
-
-        def get_wrapper(self, exclusive: bool = False):
-            method_wrapper(self, "get", exclusive)
-
-        def post_wrapper(self, exclusive: bool = False):
-            method_wrapper(self, "post", exclusive)
-
-        def put_wrapper(self, exclusive: bool = False):
-            method_wrapper(self, "put", exclusive)
-
-        def patch_wrapper(self, exclusive: bool = False):
-            method_wrapper(self, "patch", exclusive)
-
-        def delete_wrapper(self, exclusive: bool = False):
-            method_wrapper(self, "delete", exclusive)
-
-
         def decorated(func) -> partial:
             nonlocal url
             if url is None:
@@ -360,12 +337,6 @@ class App:
             func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.lower().split(','))
             func.cors = None if not cors else {c.lower() for c in cors} if isinstance(cors, (list, set, dict, tuple)) else {c for c in cors.lower().strip().split(',') if c}
             func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
-
-            # wrappers
-            func.get = get_wrapper
-            func.put = put_wrapper
-            func.post = post_wrapper
-
 
             func.cache = []
             func.disable_default_errors = set(disable_default_errors) if disable_default_errors else set()
@@ -382,6 +353,13 @@ class App:
             del cls.__route_cache[path]
         else:
             cls.__route_cache.clear()
+
+
+App.route.__func__.get = partial(App.route, methods="GET")
+App.route.__func__.put = partial(App.route, methods="PUT")
+App.route.__func__.post = partial(App.route, methods="POST")
+App.route.__func__.patch = partial(App.route, methods="PATCH")
+App.route.__func__.delete = partial(App.route, methods="DELETE")
 
 
 class RequestHandler(BaseHTTPRequestHandler):

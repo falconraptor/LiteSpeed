@@ -258,14 +258,17 @@ class App:
         def _handle_body(_body):
             nonlocal body
             if callable(_body):
-                body = _body()
-            elif isinstance(_body, dict):
+                _body = _body()  # Allow _body to be fully parsed
+
+            if isinstance(_body, (dict, list, tuple, dict_keys)):  # JSON-like
                 body = json.dumps(_body, default=json_serial).encode()
                 headers['Content-Type'] = 'application/json; charset=utf-8'
-            elif isinstance(_body, dict_keys):
-                body = list(_body)
-            else:
+            # elif isinstance(_body, dict_keys):
+            #     body = list(_body)
+            elif isinstance(_body, (str, bytes, int)):  # HTML-like / Byte-able:
                 body = _body
+            else:
+                raise TypeError(f"Body of type '{type(_body)}' is not supported!")
 
         if result:  # if result is not None parse for body, _status, headers
             if isinstance(result, (tuple, type(namedtuple))):  # only unpack tuple-likes
@@ -279,10 +282,13 @@ class App:
                         _process_headers(result[2])
                 else:
                     raise TypeError("Tuples cannot be returned directly; please convert the tuple to a list.")  # TODO Better error message
-            elif isinstance(result, (dict, list)):  # Handle json-like types
-                _handle_body(result)
-            elif isinstance(result, (str, bytes)): # Handle html-like types
+            else:
                 body = result
+            # elif isinstance(result, (dict, list)):  # Handle json-like types
+            #     body = result
+            # elif isinstance(result, (str, bytes)):  # Handle html-like types
+            #     body = result
+            _handle_body(body)
         else:  # set 501 status code when falsy result
             status = '501 Not Implemented'
         if 'Content-Type' not in headers:  # add default html header if none passed

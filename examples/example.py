@@ -115,23 +115,6 @@ def media(request: Request, file: str):
     return serve(f'examples/media/{file}', range=request.HEADERS.get('RANGE'))
 
 
-@route(r'generate/list/(\d)+/([\w\s./]+)')
-def generate_list(request: Request, count: int, data: str):
-    return [data for _ in range(count)]
-
-
-@route(r'generate/tuple/(\d)+/([\w\s./]+)')
-def generate_tuple(request: Request, count: int, data: str):
-    return tuple([data for _ in range(count)])
-
-
-@route(r'generate/dict/(\d)+/([\w\s./]+)')
-def generate_dict(request: Request, count: int, data: str):
-    return {'list': [{'index': num, 'data': data} for num in range(count)],
-            'count': count,
-            'data': data}
-
-
 route(r'num/(?P<num>\d+)', function=test2)  # add function to routes without decorator: /num/[any number]/
 if __name__ == '__main__':
     print(App._urls)

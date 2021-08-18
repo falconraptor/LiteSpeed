@@ -293,7 +293,21 @@ class App:
             status = '501 Not Implemented'
         if 'Content-Type' not in headers:  # add default html header if none passed
             headers['Content-Type'] = 'text/html; charset=utf-8'
-        body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else [str(body).encode()] if isinstance(body, int) else body
+
+        # First case is required to terminate any following ifs
+        if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body):
+            pass  # body = body
+        elif isinstance(body, list) and ((body and isinstance(body[0], str)) or not body):
+            body = [b.encode() for b in body]
+        elif isinstance(body, bytes):
+            body = [body]
+        elif isinstance(body, str):
+            body = [body.encode()]
+        elif isinstance(body, int):
+            body = [str(body).encode()]
+        else:
+            pass  # body = body
+
         if body:
             _handle_compression()
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]

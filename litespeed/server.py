@@ -5,7 +5,7 @@ import struct
 import sys
 from base64 import b64encode
 from collections import namedtuple
-from _collections_abc import dict_keys
+from _collections_abc import dict_keys, dict_values
 from datetime import datetime
 from functools import partial
 from gzip import GzipFile
@@ -257,16 +257,19 @@ class App:
 
         def _handle_body(_body):
             nonlocal body
-            if callable(_body):
+
+            while callable(_body):
                 _body = _body()  # Allow _body to be fully parsed
 
-            if isinstance(_body, (dict, list, tuple, dict_keys)):  # JSON-like
+            if isinstance(_body, (dict, list, tuple, dict_keys, dict_values)):  # JSON-like
                 body = json.dumps(_body, default=json_serial).encode()
                 headers['Content-Type'] = 'application/json; charset=utf-8'
             # elif isinstance(_body, dict_keys):
             #     body = list(_body)
-            elif isinstance(_body, (str, bytes, int)):  # HTML-like / Byte-able:
+            elif isinstance(_body, (str, bytes)):  # HTML-like / Byte-able
                 body = _body
+            elif isinstance(_body, int):  # String-able
+                body = str(_body)
             else:
                 raise TypeError(f"Body of type '{type(_body)}' is not supported!")
 
@@ -284,31 +287,18 @@ class App:
                     raise TypeError("Tuples cannot be returned directly; please convert the tuple to a list.")  # TODO Better error message
             else:
                 body = result
-            # elif isinstance(result, (dict, list)):  # Handle json-like types
-            #     body = result
-            # elif isinstance(result, (str, bytes)):  # Handle html-like types
-            #     body = result
             _handle_body(body)
         else:  # set 501 status code when falsy result
             status = '501 Not Implemented'
         if 'Content-Type' not in headers:  # add default html header if none passed
             headers['Content-Type'] = 'text/html; charset=utf-8'
 
-        # First case is required to terminate any following ifs
-        if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body):
-            pass  # body = body
-        elif isinstance(body, list) and ((body and isinstance(body[0], str)) or not body):
-            body = [b.encode() for b in body]
-        elif isinstance(body, bytes):
-            body = [body]
-        elif isinstance(body, str):
-            body = [body.encode()]
-        elif isinstance(body, int):
-            body = [str(body).encode()]
-        else:
-            pass  # body = body
-
         if body:
+            # Handle Body converts everything to either string or bytes, so if body IS present...
+            if isinstance(body, str):  # check if its a string
+                body = body.encode()
+            body = [body]  # Convert to list of bytes
+
             _handle_compression()
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 

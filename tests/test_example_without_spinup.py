@@ -67,12 +67,12 @@ def jsonify(d):
 
 
 def test_index():
-    data = [f'<a href="{func.url}">{func.url}</a><br>' for name, func in App._urls]
+    data = [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls]
     url_test('/examples/example/', ('*',), 200, [jsonify(data)])
 
 
 def test_index2():
-    data = [f'<a href="{func.url}">{func.url}</a><br>' for name, func in App._urls]
+    data = [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls]
     url_test('/examples/example/index2/', ('*',), 200, [jsonify(data)])
 
 

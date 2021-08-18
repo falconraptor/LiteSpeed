@@ -268,22 +268,17 @@ class App:
                 body = _body
 
         if result:  # if result is not None parse for body, _status, headers
-            if isinstance(result, (tuple, type(namedtuple), list)):
+            if isinstance(result, (tuple, type(namedtuple))):  # only unpack tuple-likes
                 l_result = len(result)
                 if 3 >= l_result > 1:
                     _handle_status(result[1])
                     if l_result > 2 and result[2]:
                         _process_headers(result[2])
-                _handle_body(result[0] if l_result <= 3 else result)
-            elif isinstance(result, dict):
-                if 'body' in result:
-                    _handle_body(result['body'])
-                _handle_status(result.get('_status'))
-                if 'headers' in result:
-                    _process_headers(result['headers'])
-                if not (body or status != '200 OK'):
-                    body = json.dumps(result, default=json_serial).encode()
-                    headers['Content-Type'] = 'application/json; charset=utf-8'
+                else:
+                    raise TypeError(
+                        "Tuples cannot be returned directly; please convert the tuple to a list.")  # TODO Better error message
+            elif isinstance(result, (dict, list)):  # Handle json-like types
+                _handle_body(result)
             elif isinstance(result, (str, bytes)):
                 body = result
         else:  # set 501 status code when falsy result

@@ -113,8 +113,24 @@ def test_static():
         url_test('/static/css with a space.css', ('GET',), 200, [file.read()])
 
 
-def test_501():
-    url_test('/examples/example/_501/', ('GET',), 501, [b'This is a 501 error'])
+def test_501_code():
+    url_test('/examples/example/_501_code/', ('GET',), 501, [b'This is a 501 error'])
+
+
+def test_501_exception():
+    url_test('/examples/example/_501_exception/', ('GET',), 501, [b'This is a 501 error'])
+
+
+def test_404_exception():
+    url_test('/examples/example/_404_exception/', ('GET',), 404, [b'This page should appear as a 404 error.'])
+
+
+def test_404_exception_alt():
+    url_test('/examples/example/_404_exception_alt/', ('GET',), 404, [b'This page should appear as a 404 error.'])
+
+
+def test_404_error():
+    url_test('/examples/example/_404_error/', ('GET',), 404, [b'This page should appear as a 404 error.'])
 
 
 def test_206():
@@ -150,3 +166,13 @@ def test_206():
             assert line == body[0][start:stop + 1]
             after = 0
     assert line == f'--{boundary}--'.encode()
+
+
+def test_multi_method():
+    url_test('/examples/example/multi_method/', ('GET',), 200, [b'GET'], skip_405=True)
+    url_test('/examples/example/multi_method/', ('POST',), 202, [b'POST'], skip_405=True)
+    url_test('/examples/example/multi_method/', ('PUT',), 201, [b'PUT'], skip_405=True)
+
+
+def test_broken():
+    url_test('/examples/example/broken/', ('GET',), 501, ['This is a 501 error'.encode()], skip_405=True)

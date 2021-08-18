@@ -227,6 +227,14 @@ def test_206(server):
     assert line == f'--{boundary}--'
 
 
+
+def test_route_decorator(server):
+    url_test('/route_decorator/', ('GET',), 200, b'', port=server, skip_405=True)
+    url_test('/route_decorator/', ('PUT',), 202, b'', port=server, skip_405=True)
+    url_test('/route_decorator/', ('POST',), 201, b'', port=server, skip_405=True)
+    url_test('/route_decorator/', ('DELETE',), 204, b'', port=server, skip_405=True)
+    url_test('/route_decorator/', ('PATCH',), 202, b'', port=server, skip_405=True)
+
 def test_multi_method(server):
     url_test('/examples/example/multi_method/', ('GET',), 200, b'GET', port=server, skip_405=True)
     url_test('/examples/example/multi_method/', ('POST',), 202, b'POST', port=server, skip_405=True)

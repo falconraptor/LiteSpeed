@@ -348,6 +348,7 @@ class App:
             func.methods = {m.lower() for m in methods} if isinstance(methods, (list, set, dict, tuple)) else set(methods.lower().split(','))
             func.cors = None if not cors else {c.lower() for c in cors} if isinstance(cors, (list, set, dict, tuple)) else {c for c in cors.lower().strip().split(',') if c}
             func.cors_methods = None if not cors_methods else {c.lower() for c in cors_methods} if isinstance(cors_methods, (list, set, dict, tuple)) else {c for c in cors_methods.lower().strip().split(',') if c}
+
             func.cache = []
             func.disable_default_errors = set(disable_default_errors) if disable_default_errors else set()
             cls._urls.append(func)
@@ -363,6 +364,13 @@ class App:
             del cls.__route_cache[path]
         else:
             cls.__route_cache.clear()
+
+
+App.route.__func__.get = partial(App.route, methods="GET")
+App.route.__func__.put = partial(App.route, methods="PUT")
+App.route.__func__.post = partial(App.route, methods="POST")
+App.route.__func__.patch = partial(App.route, methods="PATCH")
+App.route.__func__.delete = partial(App.route, methods="DELETE")
 
 
 class RequestHandler(BaseHTTPRequestHandler):

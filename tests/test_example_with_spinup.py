@@ -12,6 +12,7 @@ from websocket import WebSocket
 
 from examples import example
 from litespeed import App, start_server
+from litespeed.utils import json_serial
 
 
 @pytest.fixture
@@ -96,12 +97,27 @@ def test_test2(server):
     url_test('/num/1234488/', ('*',), 200, b'Test2 [1234488]', port=server)
 
 
+# Helper to match the server's JSON-like results
+def jsonify(d):
+    return json.dumps(d, default=json_serial).encode()
+
+
+# Helper to convert list of strings to html-like result
+def htmlify(d):
+    if isinstance(d, (list, tuple)):
+        return "".join(d).encode()
+    else:
+        return d.encode()
+
+
 def test_index(server):
-    url_test('/examples/example/', ('*',), 200, b''.join(f'<a href="{func.url}">{func.url}</a><br>'.encode() for func in App._urls), port=server)
+    data = [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls]
+    url_test('/examples/example/', ('*',), 200, htmlify(data), port=server)
 
 
 def test_index2(server):
-    url_test('/examples/example/index2/', ('*',), 200, b''.join(f'<a href="{func.url}">{func.url}</a><br>'.encode() for func in App._urls), port=server)
+    data = [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls]
+    url_test('/examples/example/index2/', ('*',), 200, htmlify(data), port=server)
 
 
 def test_article(server):
@@ -151,6 +167,10 @@ def test_echo(server):
     assert {'msg': 'Hello World!', 'id': 1} == data
     data = json.loads(ws.recv())
     assert {'msg': 'Hello World!', 'id': 1} == data
+
+
+def test_nested_500(server):
+    url_test("/examples/example/_500_nested_exception/", ('GET',), 500, b'', port=server)
 
 
 def test_501_code(server):

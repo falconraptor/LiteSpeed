@@ -5,7 +5,7 @@ import struct
 import sys
 from base64 import b64encode
 from collections import namedtuple
-from _collections_abc import dict_keys
+from _collections_abc import dict_keys, dict_values
 from datetime import datetime
 from functools import partial
 from gzip import GzipFile
@@ -266,42 +266,53 @@ class App:
 
         def _handle_body(_body):
             nonlocal body
-            if callable(_body):
-                body = _body()
-            elif isinstance(_body, dict):
+
+            while callable(_body):
+                _body = _body()  # Allow _body to be fully parsed
+
+            if isinstance(_body, (dict, list, tuple, dict_keys, dict_values)):  # JSON-like
                 body = json.dumps(_body, default=json_serial).encode()
                 headers['Content-Type'] = 'application/json; charset=utf-8'
-            elif isinstance(_body, dict_keys):
-                body = list(_body)
-            else:
+            # elif isinstance(_body, dict_keys):
+            #     body = list(_body)
+            elif isinstance(_body, (str, bytes)):  # HTML-like / Byte-able
                 body = _body
+            elif isinstance(_body, int):  # String-able
+                body = str(_body)
+            else:
+                raise TypeError(f"Body of type '{type(_body)}' is not supported!")
 
         if result:  # if result is not None parse for body, _status, headers
-            if isinstance(result, (tuple, type(namedtuple), list)):
+            if isinstance(result, (tuple, type(namedtuple))):  # only unpack tuple-likes
                 l_result = len(result)
-                if 3 >= l_result > 1:
-                    _handle_status(result[1])
+
+                if 3 >= l_result > 0:
+                    body = result[0]
+                    if l_result > 1:
+                        _handle_status(result[1])
                     if l_result > 2 and result[2]:
                         _process_headers(result[2])
-                _handle_body(result[0] if l_result <= 3 else result)
-            elif isinstance(result, dict):
-                if 'body' in result:
-                    _handle_body(result['body'])
-                _handle_status(result.get('_status'))
-                if 'headers' in result:
-                    _process_headers(result['headers'])
-                if not (body or status != '200 OK'):
-                    body = json.dumps(result, default=json_serial).encode()
-                    headers['Content-Type'] = 'application/json; charset=utf-8'
-            elif isinstance(result, (str, bytes)):
+                else:
+                    raise TypeError("Tuples cannot be returned directly; please convert the tuple to a list.")  # TODO Better error message
+            else:
                 body = result
+            _handle_body(body)
         else:  # set 501 status code when falsy result
             status = '501 Not Implemented'
         if 'Content-Type' not in headers:  # add default html header if none passed
             headers['Content-Type'] = 'text/html; charset=utf-8'
-        body = body if isinstance(body, list) and ((body and isinstance(body[0], bytes)) or not body) else [b.encode() for b in body] if isinstance(body, list) and ((body and isinstance(body[0], str)) or not body) else [body] if isinstance(body, bytes) else [body.encode()] if isinstance(body, str) else [str(body).encode()] if isinstance(body, int) else body
-        if body:
+
+        should_compress = bool(body)  # convert truthy/falsy to bool (We check this before to avoid compressing empty payloads)
+
+        # Convert body to byte-list
+        # Handle Body converts everything to either string or bytes
+        if isinstance(body, str):  # check if its a string
+            body = body.encode()  # Convert to bytes
+        body = [body]
+
+        if should_compress:
             _handle_compression()
+
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 
     def _handle_route_cache(self, env: Request) -> List[Tuple[Callable, Union[Generator, List[str]], Dict[str, str]]]:

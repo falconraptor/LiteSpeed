@@ -1,8 +1,10 @@
 import mimetypes
 from http.cookies import SimpleCookie
-from typing import Iterable
+from typing import Iterable, List
+import json
 
 from examples.example import App
+from litespeed.utils import json_serial
 
 
 def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: Iterable[bytes], expected_headers: dict = None, skip_405: bool = False, method_params: dict = None, requested_headers: dict = None):
@@ -59,12 +61,27 @@ def test_test2():
     url_test('/num/1234488/', ('*',), 200, [b'Test2 [1234488]'])
 
 
+# Helper to match the server's JSON-like results
+def jsonify(d):
+    return json.dumps(d, default=json_serial).encode()
+
+
+# Helper to convert list of strings to html-like result
+def htmlify(d):
+    if isinstance(d, (list, tuple)):
+        return "".join(d).encode()
+    else:
+        return d.encode()
+
+
 def test_index():
-    url_test('/examples/example/', ('*',), 200, [f'<a href="{func.url}">{func.url}</a><br>'.encode() for func in App._urls])
+    data = [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls]
+    url_test('/examples/example/', ('*',), 200, [htmlify(data)])
 
 
 def test_index2():
-    url_test('/examples/example/index2/', ('*',), 200, [f'<a href="{func.url}">{func.url}</a><br>'.encode() for func in App._urls])
+    data = [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls]
+    url_test('/examples/example/index2/', ('*',), 200, [htmlify(data)])
 
 
 def test_article():
@@ -102,6 +119,9 @@ def test_css():
 def test_static():
     with open('examples/static/css with a space.css', 'rb') as file:
         url_test('/static/css with a space.css', ('GET',), 200, [file.read()])
+
+def test_nested_500():
+    url_test("/examples/example/_500_nested_exception/", ('GET',), 500, [b''])
 
 
 def test_501_code():

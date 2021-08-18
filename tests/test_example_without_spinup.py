@@ -120,6 +120,9 @@ def test_static():
     with open('examples/static/css with a space.css', 'rb') as file:
         url_test('/static/css with a space.css', ('GET',), 200, [file.read()])
 
+def test_nested_500():
+    url_test("/examples/example/_500_nested_exception/", ('GET',), 500, [b''])
+
 
 def test_501_code():
     url_test('/examples/example/_501_code/', ('GET',), 501, [b'This is a 501 error'])

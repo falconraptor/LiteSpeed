@@ -169,6 +169,10 @@ def test_echo(server):
     assert {'msg': 'Hello World!', 'id': 1} == data
 
 
+def test_nested_500(server):
+    url_test("/examples/example/_500_nested_exception/", ('GET',), 500, b'', port=server)
+
+
 def test_501_code(server):
     url_test('/examples/example/_501_code/', ('GET',), 501, b'This is a 501 error', port=server)
 

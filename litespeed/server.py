@@ -293,13 +293,17 @@ class App:
         if 'Content-Type' not in headers:  # add default html header if none passed
             headers['Content-Type'] = 'text/html; charset=utf-8'
 
-        if body:
-            # Handle Body converts everything to either string or bytes, so if body IS present...
-            if isinstance(body, str):  # check if its a string
-                body = body.encode()
-            body = [body]  # Convert to list of bytes
+        should_compress = bool(body)  # convert truthy/falsy to bool (We check this before to avoid compressing empty payloads)
 
+        # Convert body to byte-list
+        # Handle Body converts everything to either string or bytes
+        if isinstance(body, str):  # check if its a string
+            body = body.encode()  # Convert to bytes
+        body = [body]
+
+        if should_compress:
             _handle_compression()
+
         return body, status, [(k, v) for k, v in headers.items()] + [('Set-Cookie', c[12:]) for c in env.COOKIE.output().replace('\r', '').split('\n') if c not in cookie]
 
     def _handle_route_cache(self, path: str) -> Union[bool, Callable]:

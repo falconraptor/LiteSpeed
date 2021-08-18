@@ -1,8 +1,10 @@
 import mimetypes
 from http.cookies import SimpleCookie
-from typing import Iterable
+from typing import Iterable, List
+import json
 
 from examples.example import App
+from litespeed.utils import json_serial
 
 
 def url_test(url: str, allowed_methods: Iterable[str], expected_status: int, expected_result: Iterable[bytes], expected_headers: dict = None, skip_405: bool = False, method_params: dict = None, requested_headers: dict = None):
@@ -59,12 +61,19 @@ def test_test2():
     url_test('/num/1234488/', ('*',), 200, [b'Test2 [1234488]'])
 
 
+# Helper to match the server's JSON-like results
+def jsonify(d):
+    return json.dumps(d, default=json_serial).encode()
+
+
 def test_index():
-    url_test('/examples/example/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
+    data = [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()]
+    url_test('/examples/example/', ('*',), 200, [jsonify(data)])
 
 
 def test_index2():
-    url_test('/examples/example/index2/', ('*',), 200, [f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()])
+    data = [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()]
+    url_test('/examples/example/index2/', ('*',), 200, [jsonify(data)])
 
 
 def test_article():

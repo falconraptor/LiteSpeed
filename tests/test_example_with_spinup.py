@@ -12,6 +12,7 @@ from websocket import WebSocket
 
 from examples import example
 from litespeed import App, start_server
+from litespeed.utils import json_serial
 
 
 @pytest.fixture
@@ -96,12 +97,19 @@ def test_test2(server):
     url_test('/num/1234488/', ('*',), 200, b'Test2 [1234488]', port=server)
 
 
+# Helper to match the server's JSON-like results
+def jsonify(d):
+    return json.dumps(d, default=json_serial).encode()
+
+
 def test_index(server):
-    url_test('/examples/example/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
+    data = [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()]
+    url_test('/examples/example/', ('*',), 200, jsonify(data), port=server)
 
 
 def test_index2(server):
-    url_test('/examples/example/index2/', ('*',), 200, b''.join(f'<a href="{func.url}">{name}</a><br>'.encode() for name, func in App._urls.items()), port=server)
+    data = [f'<a href="{func.url}">{name}</a><br>' for name, func in App._urls.items()]
+    url_test('/examples/example/index2/', ('*',), 200,  jsonify(data), port=server)
 
 
 def test_article(server):

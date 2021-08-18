@@ -66,14 +66,22 @@ def jsonify(d):
     return json.dumps(d, default=json_serial).encode()
 
 
+# Helper to convert list of strings to html-like result
+def htmlify(d):
+    if isinstance(d, (list, tuple)):
+        return "".join(d).encode()
+    else:
+        return d.encode()
+
+
 def test_index():
     data = [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls]
-    url_test('/examples/example/', ('*',), 200, [jsonify(data)])
+    url_test('/examples/example/', ('*',), 200, [htmlify(data)])
 
 
 def test_index2():
     data = [f'<a href="{func.url}">{func.url}</a><br>' for func in App._urls]
-    url_test('/examples/example/index2/', ('*',), 200, [jsonify(data)])
+    url_test('/examples/example/index2/', ('*',), 200, [htmlify(data)])
 
 
 def test_article():

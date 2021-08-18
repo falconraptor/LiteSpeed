@@ -141,3 +141,10 @@ def test_206():
             assert line == body[0][start:stop + 1]
             after = 0
     assert line == f'--{boundary}--'.encode()
+
+
+# def test_list_response():
+#     # print("\n".join(App._urls.keys()))
+#     data = "Repeated"
+#     for count in range(3):
+#         url_test(f"generate/list/{count}/{data}", ('GET',), 200, None)

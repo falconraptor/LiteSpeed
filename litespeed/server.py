@@ -270,16 +270,18 @@ class App:
         if result:  # if result is not None parse for body, _status, headers
             if isinstance(result, (tuple, type(namedtuple))):  # only unpack tuple-likes
                 l_result = len(result)
-                if 3 >= l_result > 1:
-                    _handle_status(result[1])
+
+                if 3 >= l_result > 0:
+                    body = result[0]
+                    if l_result > 1:
+                        _handle_status(result[1])
                     if l_result > 2 and result[2]:
                         _process_headers(result[2])
                 else:
-                    raise TypeError(
-                        "Tuples cannot be returned directly; please convert the tuple to a list.")  # TODO Better error message
+                    raise TypeError("Tuples cannot be returned directly; please convert the tuple to a list.")  # TODO Better error message
             elif isinstance(result, (dict, list)):  # Handle json-like types
                 _handle_body(result)
-            elif isinstance(result, (str, bytes)):
+            elif isinstance(result, (str, bytes)): # Handle html-like types
                 body = result
         else:  # set 501 status code when falsy result
             status = '501 Not Implemented'

@@ -2,7 +2,7 @@ import mimetypes
 import re
 from email.message import EmailMessage
 from email.utils import make_msgid
-from os.path import exists
+from os.path import exists, basename
 from smtplib import SMTP, SMTP_SSL
 from threading import Thread
 from typing import Iterable, List, Optional, Union
@@ -72,7 +72,7 @@ class Mail:
                     ctype = 'application/octet-stream'
                 maintype, subtype = ctype.split('/', 1)
                 with open(f, 'rb') as fp:
-                    self.message.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=f)
+                    self.message.add_attachment(fp.read(), maintype=maintype, subtype=subtype, filename=basename(f))
         return self
 
     def send(self, host: Optional[str] = None, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None, tls: bool = True, ssl: bool = False, timeout: Optional[int] = None, wait: bool = False):

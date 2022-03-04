@@ -371,6 +371,9 @@ App.route.__func__.put = partial(App.route, methods="PUT")
 App.route.__func__.post = partial(App.route, methods="POST")
 App.route.__func__.patch = partial(App.route, methods="PATCH")
 App.route.__func__.delete = partial(App.route, methods="DELETE")
+RE_DASHES = re.compile(r'-*')
+RE_NAME = re.compile(r'name="(.*?)"')
+RE_FILENAME = re.compile(r'filename="(.*?)"')
 
 
 class RequestHandler(BaseHTTPRequestHandler):
@@ -403,29 +406,26 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _get_boundary_enclosed(boundary: List[str], env: Request):
         boundary = boundary[0] + '--'
         line, content, name, filename = '', '', '', ''
-        dashes = re.compile(r'-*')
-        re_name = re.compile(r'name="(.*?)"')
-        re_filename = re.compile(r'filename="(.*?)"')
         file = None
         skip_first = True
         body = env['BODY'].split(b'\n')
         i = 0
         skip = -1
-        while not line or isinstance(line, bytes) or dashes.sub('', line, 1) != boundary:
+        while not line or isinstance(line, bytes) or RE_DASHES.sub('', line, 1) != boundary:
             line = body[i] + (b'\n' if i < len(body) else b'')
             try:
                 decoded = line.decode().replace('\r', '').replace('\n', '')
                 if decoded:
-                    if dashes.sub('', decoded, 1) in {boundary[:-2], boundary}:
+                    if RE_DASHES.sub('', decoded, 1) in {boundary[:-2], boundary}:
                         name, filename, content = '', '', ''
                         skip_first = True
                         if file:
                             file.seek(0)
                     if not content:
                         if not name:
-                            name = (re_name.findall(decoded) or [''])[0]
+                            name = (RE_NAME.findall(decoded) or [''])[0]
                         if not filename:
-                            filename = re_filename.findall(decoded)
+                            filename = RE_FILENAME.findall(decoded)
                             if filename:
                                 filename = filename[0]
                                 file = BytesIO()
@@ -448,10 +448,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 else:
                     skip_first = False
             elif skip == 0:
-                env[env['REQUEST_METHOD']][name] = decoded if decoded and dashes.sub('', decoded, 1) != boundary else line
+                env[env['REQUEST_METHOD']][name] = decoded if RE_DASHES.sub('', decoded, 1) != boundary else line
                 name = ''
                 skip = -1
-            elif name and ((decoded and not re_name.findall(decoded)) or decoded != line) and not filename and skip == -1:
+            elif name and ((decoded and not RE_NAME.findall(decoded)) or decoded != line) and not filename and skip == -1:
                 skip = 1
             if not content:
                 line = decoded

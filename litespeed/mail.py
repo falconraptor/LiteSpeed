@@ -44,7 +44,7 @@ class Mail:
         if embed_files and self.html:
             for file in (extra_embed or []) + re.findall(r'<(?:link|script|img)[\w\"\s=]*(?:href|src)=\"([\w/._:-]+)\"', self.html):
                 type = 'local'
-                if file.startswith('http') or file.startswith('//'):
+                if file[:2] == '//' or file[:4] == 'http':
                     type = 'remote'
                 cid = make_msgid()
                 self.html = self.html.replace(file, f'cid:{cid[1:-1]}')
@@ -52,13 +52,8 @@ class Mail:
                 if ctype is None or encoding is not None:
                     ctype = 'application/octet-stream'
                 maintype, subtype = ctype.split('/', 1)
-                if type == 'local':
-                    with open(file, 'rb') as fp:
-                        cids.append((fp.read(), maintype, subtype, cid))
-                else:
-                    with urlopen(file) as fp:
-                        cids.append((fp.read(), maintype, subtype, cid))
-        if self.html:
+                with (open(file, 'rb') if type == 'local' else urlopen(file)) as fp:
+                    cids.append((fp.read(), maintype, subtype, cid))
             self.message.get_payload()[1].set_payload(self.html)
             for cid in cids:
                 self.message.get_payload()[1].add_related(cid[0], cid[1], cid[2], cid=cid[3])

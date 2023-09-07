@@ -110,8 +110,7 @@ class ExceptionReporter:
         if isinstance(source[0], bytes):  # If we just read the source from a file, or if the loader did not apply tokenize.detect_encoding to decode the source into a string, then we should do that ourselves.
             encoding = 'ascii'
             for line in source[:2]:
-                match = re.search(br'coding[:=]\s*([-\w.]+)', line)  # File coding may be specified. Match pattern from PEP-263  (https://www.python.org/dev/peps/pep-0263/)
-                if match:
+                if match := re.search(br'coding[:=]\s*([-\w.]+)', line):  # File coding may be specified. Match pattern from PEP-263  (https://www.python.org/dev/peps/pep-0263/)
                     encoding = match.group(1).decode('ascii')
                     break
             source = [str(_, encoding, 'replace') for _ in source]

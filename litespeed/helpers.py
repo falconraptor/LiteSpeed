@@ -8,7 +8,7 @@ from litespeed.server import App
 from litespeed.utils import Request
 
 
-def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Optional[Union[List[str], str]] = None, status_override: int = None) -> Tuple[bytes, int, Dict[str, str]]:
+def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: int = 0, files: Optional[List[str]] = None, status_override: int = None) -> Tuple[bytes, int, Dict[str, str]]:
     """Send a file to the client, replacing ~~ controls to help with rendering blocks.\n
     Allows for ~~extends [file]~~, ~~includes [file]~~, and content blocks <~~[name]~~>[content]</~~[name]~~>.\n
     Extends will inject the blocks from this file to the one specified.\n
@@ -17,28 +17,25 @@ def render(request: Request, file: str, data: Dict[str, Any] = None, cache_age: 
     Also allows for pure python by doing ~~[python code that returns / is a string]~~
 
     :returns:Tuple[bytes, int, Dict[str, str]]"""
-    if data is None:
-        data = {}
-    if files is None:
-        files = []
     lines, status, headers = serve(file, cache_age, status_override=status_override, range=(request or {}).get('HEADERS', {}).get('RANGE'))
     if status in {200, status_override}:
         lines = lines.decode()
-        if isinstance(files, str):
-            files = [files]
         extends = re.search(r'~~extends ([\w\s./\\-]+)~~', lines.split('\n', 1)[0])
+        files = files or []
         if extends:
             return render(request, extends[1], data, cache_age, [file] + files)
         find = re.compile(r'<~~(\w+)~~>(.*?)</~~\1~~>', re.DOTALL)
-        for file in files or []:
+        data = data or {}
+        files_data = {}
+        for file in files:
             if exists(file):
                 with open(file, 'rt') as _in:
-                    data.update({k: v for k, v in find.findall(_in.read())})
+                    file_data = files_data[file] = _in.read()
+                    data.update({k: v for k, v in find.findall(file_data)})
         for _ in range(2):
             for file in re.findall(r'~~includes ([\w\s./\\-]+)~~', lines):
-                if exists(file):
-                    with open(file) as _in:
-                        lines = lines.replace(f'~~includes {file}~~', _in.read(), 1)
+                if file in files_data:
+                    lines = lines.replace(f'~~includes {file}~~', files_data[file], 1)
             for key, value in data.items():
                 lines = lines.replace(f'~~{key}~~', str(value))
             for match in re.findall(r'(<?~~([^~]+)~~>?)', lines):
@@ -60,10 +57,9 @@ def serve(file: str, cache_age: int = 0, headers: Optional[Dict[str, str]] = Non
     :returns:Tuple[bytes, int, Dict[str, str]]"""
     # prevent serving files outside of current / specified dir (prevents download of all system files)
     file = file.replace('../', '')
-    if headers is None:
-        headers = {}
     if not exists(file):  # return 404 on file not exists
         return b'', 404, {}
+    headers = headers or {}
     if 'Content-Type' not in headers:  # if content-type is not already specified then guess from mimetype
         ctype, encoding = mimetypes.guess_type(file)
         if ctype is None or encoding is not None:
@@ -114,7 +110,7 @@ def _handle_206(file: str, _in: BinaryIO, headers: Dict[str, str] = None, range:
         boundary = token_hex(7)
         content = headers['Content-Type']
         headers['Content-Type'] = f'multipart/byteranges; boundary={boundary}'
-        lines = '\n'.join(f'--{boundary}\nContent-Type: {content}\nContent-Range: {r[1]}\n\n{r[0].decode() if content.startswith("text/") else r[0].hex()}' for r in result) + f'\n--{boundary}--'
+        lines = '\n'.join(f'--{boundary}\nContent-Type: {content}\nContent-Range: {r[1]}\n\n{r[0].decode() if content[:5] == "text/" else r[0].hex()}' for r in result) + f'\n--{boundary}--'
     else:
         lines, range = result[0]
         headers['Content-Range'] = range
@@ -127,9 +123,8 @@ def _read_range(range: str) -> Tuple[str, List[Tuple[Union[int, None], Union[int
     A None value in the pair range specifies that the value was not given, this is expected behaviour.
     :returns:Tuple[str,List[Tuple[Union[int,None],Union[int,None]]]]"""
     format, split_on_pairs = range.split('=', 1)
-    split_on_pairs = split_on_pairs.split(',')
     pairs = []
-    for pair_str in split_on_pairs:
+    for pair_str in split_on_pairs.split(','):
         split_on_range = pair_str.split('-', 1)
         start = int(split_on_range[0]) if len(split_on_range[0]) > 0 else None
         stop = int(split_on_range[1]) if len(split_on_range[1]) > 0 else None
